@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 import time
 from pathlib import Path
 from typing import Literal
@@ -79,14 +80,24 @@ class Tracer:
         self.output_path = Path(output_path)
         self._fh = None
         self._t0: float | None = None
+        self._lock = threading.Lock()
 
     def start(self) -> None:
         """Open the output file and record t0."""
-        raise NotImplementedError("Implement: open file, set self._t0 = time.monotonic()")
+        self.output_path.parent.mkdir(parents=True, exist_ok=True)
+        self._fh = self.output_path.open("a", encoding="utf-8")
+        self._t0 = time.monotonic()
 
     def stop(self) -> None:
         """Flush and close. Idempotent."""
-        raise NotImplementedError
+        with self._lock:
+            if self._fh is None:
+                return
+            try:
+                self._fh.flush()
+            finally:
+                self._fh.close()
+                self._fh = None
 
     def emit(
         self,
@@ -105,4 +116,20 @@ class Tracer:
         - Write one JSON object per line, flush after each (so traces survive
           crashes mid-run)
         """
-        raise NotImplementedError
+        if self._t0 is None:
+            raise RuntimeError("Tracer.emit() called before start()")
+        with self._lock:
+            if self._fh is None:
+                raise RuntimeError("Tracer.emit() called after stop()")
+            event = {
+                "ts": time.monotonic() - self._t0,
+                "step": step,
+                "phase": phase,
+                "object_id": object_id,
+                "logical_id": logical_id,
+                "repr_type": repr_type,
+                "size_bytes": size_bytes,
+                "op": op,
+            }
+            self._fh.write(json.dumps(event) + "\n")
+            self._fh.flush()
