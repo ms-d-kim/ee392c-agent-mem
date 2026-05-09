@@ -1,0 +1,25 @@
+# Trace data — too large for git, store separately
+traces/*.jsonl
+traces/*.parquet
+traces/*.nsys-rep
+traces/*.sqlite
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.env
+*.egg-info/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp

@@ -1,0 +1,115 @@
+# Locked technical decisions
+
+These decisions are locked for the first pass. Revisit only if a downstream
+finding forces it. Document any change here with date and reason.
+
+---
+
+## 1. KV instrumentation: ANALYTICAL ONLY (first pass)
+
+**Decision:** Use the analytical estimate, not BlockManager hooks:
+```
+kv_bytes ≈ 2 × n_layers × hidden_dim × n_tokens × dtype_bytes
+```
+For Qwen2.5-Coder-7B-Instruct: 28 layers × 3584 hidden_dim × bfloat16 (2 bytes)
+→ kv_bytes ≈ 2 × 28 × 3584 × n_tokens × 2 = ~401 KB/token.
+
+**Why:** vLLM V1 KVCacheManager hook surface is not stable enough for a 5-day
+timeline. Block-level events would be nice-to-have but the analytical estimate
+captures the same first-order behavior (KV bytes scale linearly with context
+length) and we cross-check against vLLM `/metrics` `gpu_cache_usage_perc`.
+
+**Revisit:** in Week 4 if analytical estimate diverges from /metrics-reported
+KV usage by more than ~20%.
+
+---
+
+## 2. Lifetime definition: LOGICAL-PRESENCE, TASK-BOUNDED
+
+**Primary definition:**
+```
+lifetime(obj) = min(t_last_access, t_task_end) - t_first_observation
+```
+"How long did the system care about this object."
+
+**Sensitivity alternatives** (one supplementary plot in the report):
+- **Strict KV-residence lifetime** — block allocation to block free/eviction
+- **Context-window lifetime** — duration the object remained in the prompt context
+
+**Axes:** report both wall-clock seconds and step-count-normalized lifetime.
+Step-count is the more useful cross-task comparison axis.
+
+**Why this primary:** captures "how long the system cares about an object,
+regardless of representation." Other definitions are too narrow (KV-residence
+ignores text/token reuse) or too broad (context-window doesn't reflect actual
+access).
+
+---
+
+## 3. Compute: RUNPOD RTX 4090 24GB
+
+**Pod template:** `runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04`
+(or closest current equivalent — verify on RunPod template catalog)
+**GPU:** RTX 4090 24GB on-demand
+**Persistent volume:** 50GB attached at `/workspace`
+**Cost:** ~$0.40–0.70/hr on-demand
+
+**Why not local AMD RX 9060 XT:** ROCm support exists (ROCm 7.0.2+, Oct 2025
+for RDNA 4) but adds framework-debugging risk on top of methodology risk.
+Local PC is reserved for dev work against hosted APIs and trace analysis only.
+
+---
+
+## 4. Nsight Systems: IN SCOPE (droppable cut #5 only)
+
+**Decision:** Install nsys on the RunPod pod, profile one representative task,
+generate one timeline figure for the pitch and report.
+
+**Why in scope:** ~half-day cost for one strong figure validating that NVTX
+phase boundaries correspond to real kernel activity. Falls naturally into the
+same week as the system-telemetry layer.
+
+**Out of scope:** Nsight Compute (per-kernel hardware counters). Multi-day
+effort, requires `CAP_SYS_ADMIN` that RunPod containers may not grant, and
+answers a different question (kernel-level perf, not memory lifetime).
+
+**Drop trigger:** if nsys install on the chosen pod template fails or requires
+permissions we don't have. Per-pre-committed cut #5, this is the first stretch
+item to drop.
+
+---
+
+## 5. Pre-committed cuts (in order if behind schedule)
+
+Apply earliest cuts first.
+
+1. ~~BlockManager hooks → analytical KV~~ (already locked above)
+2. Drop 1.5B variance check, primary 7B model only
+3. Drop multi-task analysis, 1 task in depth
+4. Drop cross-representation duplication, text-level only
+5. Drop Nsight Systems if RunPod permissions block it
+
+The lightning pitch always presents *something* end-to-end. A complete pitch
+on one task beats a half-instrumented pitch on five.
+
+---
+
+## 6. Workload scope: 3 tools, hard step cap 15
+
+**Tools:** `read_file`, `write_file`, `run_tests`
+**Step cap:** 15 per task
+**Tasks:** 30–50 SWE-bench-lite-style (revised up from proposal's 5–10 to
+support distributional claims with bootstrap CIs)
+
+**Why simple:** memory patterns must be interpretable, not optimal for solve
+rate. Production coding agents (Claude Code, Cursor) use complex
+context-management and retrieval that would muddy the trace. This is an
+explicit scoping choice, not a hidden limitation.
+
+---
+
+## 7. JSONL schema: SEE `agent/tracer.py` DOCSTRING
+
+The schema is the contract between the agent code and analysis code. Locked
+in `agent/tracer.py`. Any schema change requires bumping a `schema_version`
+field and updating `analysis/load_traces.py`.
