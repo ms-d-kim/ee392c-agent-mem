@@ -37,6 +37,7 @@ import hashlib
 import json
 import threading
 import time
+import unicodedata
 from pathlib import Path
 from typing import Literal
 
@@ -53,13 +54,14 @@ def normalize_for_logical_id(content: str) -> str:
     Lowercase + collapse whitespace. Same content across {text, tokens, kv}
     must hash to the same logical_id.
     """
-    return " ".join(content.lower().split())
+    normalized = unicodedata.normalize("NFC", content)
+    return " ".join(normalized.lower().split())
 
 
 def compute_logical_id(content: str) -> str:
-    """SHA1 of normalized content. First 12 chars used as id for readability."""
+    """SHA1 of normalized content."""
     h = hashlib.sha1(normalize_for_logical_id(content).encode("utf-8"))
-    return h.hexdigest()[:12]
+    return h.hexdigest()
 
 
 class Tracer:
@@ -84,9 +86,12 @@ class Tracer:
 
     def start(self) -> None:
         """Open the output file and record t0."""
-        self.output_path.parent.mkdir(parents=True, exist_ok=True)
-        self._fh = self.output_path.open("a", encoding="utf-8")
-        self._t0 = time.monotonic()
+        with self._lock:
+            if self._fh is not None:
+                raise RuntimeError("Tracer.start() called while already started")
+            self.output_path.parent.mkdir(parents=True, exist_ok=True)
+            self._fh = self.output_path.open("a", encoding="utf-8")
+            self._t0 = time.monotonic()
 
     def stop(self) -> None:
         """Flush and close. Idempotent."""
@@ -116,11 +121,9 @@ class Tracer:
         - Write one JSON object per line, flush after each (so traces survive
           crashes mid-run)
         """
-        if self._t0 is None:
-            raise RuntimeError("Tracer.emit() called before start()")
         with self._lock:
-            if self._fh is None:
-                raise RuntimeError("Tracer.emit() called after stop()")
+            if self._t0 is None or self._fh is None:
+                raise RuntimeError("Tracer.emit() called before start() or after stop()")
             event = {
                 "ts": time.monotonic() - self._t0,
                 "step": step,
@@ -133,3 +136,11 @@ class Tracer:
             }
             self._fh.write(json.dumps(event) + "\n")
             self._fh.flush()
+
+    def __enter__(self) -> "Tracer":
+        self.start()
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        self.stop()
+        return False
