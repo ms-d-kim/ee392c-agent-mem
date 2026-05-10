@@ -112,10 +112,10 @@ cycle2-cx:
 
 verify:
 	@echo "Running synthetic test..."
-	python -m validation.synthetic --output traces/synthetic.jsonl
+	python3 -m validation.synthetic --output traces/synthetic.jsonl
 	@echo ""
 	@echo "Running adversarial assertions..."
-	python validation/assert_synthetic.py traces/synthetic.jsonl
+	python3 validation/assert_synthetic.py traces/synthetic.jsonl
 
 status:
 	@echo ""
