@@ -7,7 +7,18 @@ from agent.tracer import Tracer, compute_logical_id
 MAX_STEPS = 15
 MODEL_PATH = "/workspace/models/qwen-coder-7b"
 TASK_DIR = Path("tasks/hello_bug")
-TRACE_OUT = Path("traces/hello_bug_run1.jsonl")
+TRACE_OUT = Path("traces/hello_bug_run2.jsonl")
+
+# Qwen2.5-Coder-7B-Instruct (GQA): n_layers=28, n_kv_heads=4, head_dim=128, bf16
+# kv_bytes_per_token = 2(K,V) * n_layers * n_kv_heads * head_dim * dtype_bytes
+KV_BYTES_PER_TOKEN = 2 * 28 * 4 * 128 * 2  # = 57344 bytes ~= 56 KB/tok
+
+BUGGY_SRC = """def add(a, b):
+    return a - b  # bug
+
+def multiply(a, b):
+    return a * b
+"""
 
 SYSTEM_PROMPT = """You are a coding agent with three tools:
 - read_file(path): returns file contents
@@ -53,8 +64,12 @@ def emit_text(tracer, step, phase, label, content, op="create"):
     tracer.emit(step=step, phase=phase, object_id=f"{label}_tok_s{step}",
                 logical_id=lid, repr_type="tokens",
                 size_bytes=n_tok * 4, op=op)
+    return lid
 
 def main():
+    # Reset task fixture so the bug is freshly re-introduced for this run
+    (TASK_DIR / "src" / "math_utils.py").write_text(BUGGY_SRC)
+
     print("Loading model...")
     tok = AutoTokenizer.from_pretrained(MODEL_PATH)
     model = AutoModelForCausalLM.from_pretrained(
@@ -76,9 +91,14 @@ def main():
             prompt_text = tok.apply_chat_template(
                 messages, tokenize=False, add_generation_prompt=True
             )
-            emit_text(tracer, step, "prefill", "prompt", prompt_text)
+            prompt_lid = emit_text(tracer, step, "prefill", "prompt", prompt_text)
 
             inputs = tok(prompt_text, return_tensors="pt").to(model.device)
+            n_tokens = inputs.input_ids.shape[1]
+            tracer.emit(step=step, phase="prefill", object_id=f"kv_s{step}",
+                        logical_id=prompt_lid, repr_type="kv_estimated",
+                        size_bytes=n_tokens * KV_BYTES_PER_TOKEN, op="create")
+
             with torch.no_grad():
                 out = model.generate(
                     **inputs, max_new_tokens=512,
