@@ -1,34 +1,19 @@
 """
 Logical-layer tracer for the EE 392C agent-memory characterization project.
 
-JSONL event schema (the contract between agent code and analysis code):
-
+JSONL event schema:
 {
-    "ts": float,           # monotonic seconds since trace start
-    "step": int,           # agent step counter (0-indexed)
-    "phase": str,          # "prefill" | "decode" | "tool_exec" |
-                           # "agent_loop" | "task_setup"
-    "object_id": str,      # unique id for this physical instance
-                           # (e.g. "kv_block_0042", "text_msg_007",
-                           #  "tool_output_003")
-    "logical_id": str,     # sha1 of normalized content (lowercased,
-                           # whitespace-collapsed). Same content across
-                           # representations -> same logical_id.
-                           # This is how cross-representation duplication
-                           # is tracked.
-    "repr_type": str,      # "text" | "tokens" | "kv_estimated" | "kv_actual"
-    "size_bytes": int,     # physical bytes in this representation
-    "op": str,             # "create" | "read" | "mutate" | "free"
+    "ts": float, "step": int, "phase": str, "object_id": str,
+    "logical_id": str, "repr_type": str, "size_bytes": int, "op": str,
 }
 
-Schema version: 1
-Bump this version (and update analysis/load_traces.py) on any schema change.
-
-Derived metrics:
-- lifetime(logical_id) = min(t_last_access, t_task_end) - t_first_observation
-- reuse_count(logical_id) = count of "read" ops for that logical_id
-- duplication_factor(t) = sum(size_bytes) / sum(unique logical_id sizes)
-- byte_seconds(logical_id) = size_bytes * lifetime
+Schema version: 2
+  v1 -> v2 changes (2026-05-19):
+    - Tracer opens output in 'w' (truncate) mode by default; pass
+      append=True for v1 behavior. v1's silent append caused trace pollution.
+    - emit() now validates phase, repr_type, op, step, and size_bytes
+      against declared enums/types at runtime. Out-of-schema values are
+      rejected with TracerSchemaError.
 """
 
 from __future__ import annotations
@@ -41,60 +26,48 @@ import unicodedata
 from pathlib import Path
 from typing import Literal
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+
+PHASES = frozenset({"prefill", "decode", "tool_exec", "agent_loop", "task_setup"})
+REPR_TYPES = frozenset({"text", "tokens", "kv_estimated", "kv_actual"})
+OPS = frozenset({"create", "read", "mutate", "free"})
 
 Phase = Literal["prefill", "decode", "tool_exec", "agent_loop", "task_setup"]
 ReprType = Literal["text", "tokens", "kv_estimated", "kv_actual"]
 Op = Literal["create", "read", "mutate", "free"]
 
 
-def normalize_for_logical_id(content: str) -> str:
-    """Normalize content for cross-representation duplicate detection.
+class TracerSchemaError(ValueError):
+    """Raised when an emit() call violates the trace schema."""
 
-    Lowercase + collapse whitespace. Same content across {text, tokens, kv}
-    must hash to the same logical_id.
-    """
+
+def normalize_for_logical_id(content: str) -> str:
     normalized = unicodedata.normalize("NFC", content)
     return " ".join(normalized.lower().split())
 
 
 def compute_logical_id(content: str) -> str:
-    """SHA1 of normalized content."""
     h = hashlib.sha1(normalize_for_logical_id(content).encode("utf-8"))
     return h.hexdigest()
 
 
 class Tracer:
-    """Append-only JSONL event emitter.
-
-    Usage:
-        t = Tracer(Path("traces/run_001.jsonl"))
-        t.start()
-        t.emit(step=0, phase="task_setup", object_id="prompt_000",
-               logical_id=compute_logical_id(prompt_text),
-               repr_type="text", size_bytes=len(prompt_text.encode()),
-               op="create")
-        # ... agent loop ...
-        t.stop()
-    """
-
-    def __init__(self, output_path: Path):
+    def __init__(self, output_path, append=False):
         self.output_path = Path(output_path)
+        self._mode = "a" if append else "w"
         self._fh = None
-        self._t0: float | None = None
+        self._t0 = None
         self._lock = threading.Lock()
 
-    def start(self) -> None:
-        """Open the output file and record t0."""
+    def start(self):
         with self._lock:
             if self._fh is not None:
                 raise RuntimeError("Tracer.start() called while already started")
             self.output_path.parent.mkdir(parents=True, exist_ok=True)
-            self._fh = self.output_path.open("a", encoding="utf-8")
+            self._fh = self.output_path.open(self._mode, encoding="utf-8")
             self._t0 = time.monotonic()
 
-    def stop(self) -> None:
-        """Flush and close. Idempotent."""
+    def stop(self):
         with self._lock:
             if self._fh is None:
                 return
@@ -104,23 +77,22 @@ class Tracer:
                 self._fh.close()
                 self._fh = None
 
-    def emit(
-        self,
-        step: int,
-        phase: Phase,
-        object_id: str,
-        logical_id: str,
-        repr_type: ReprType,
-        size_bytes: int,
-        op: Op,
-    ) -> None:
-        """Append one event to the JSONL file.
+    def emit(self, step, phase, object_id, logical_id, repr_type, size_bytes, op):
+        if phase not in PHASES:
+            raise TracerSchemaError(f"invalid phase {phase!r}; must be one of {sorted(PHASES)}")
+        if repr_type not in REPR_TYPES:
+            raise TracerSchemaError(f"invalid repr_type {repr_type!r}; must be one of {sorted(REPR_TYPES)}")
+        if op not in OPS:
+            raise TracerSchemaError(f"invalid op {op!r}; must be one of {sorted(OPS)}")
+        if not isinstance(step, int) or step < 0:
+            raise TracerSchemaError(f"invalid step {step!r}; must be a nonnegative int")
+        if not isinstance(size_bytes, int) or size_bytes < 0:
+            raise TracerSchemaError(f"invalid size_bytes {size_bytes!r}; must be a nonnegative int")
+        if not object_id or not isinstance(object_id, str):
+            raise TracerSchemaError("object_id must be a non-empty string")
+        if not logical_id or not isinstance(logical_id, str):
+            raise TracerSchemaError("logical_id must be a non-empty string")
 
-        Implementation notes:
-        - ts = time.monotonic() - self._t0
-        - Write one JSON object per line, flush after each (so traces survive
-          crashes mid-run)
-        """
         with self._lock:
             if self._t0 is None or self._fh is None:
                 raise RuntimeError("Tracer.emit() called before start() or after stop()")
@@ -137,10 +109,10 @@ class Tracer:
             self._fh.write(json.dumps(event) + "\n")
             self._fh.flush()
 
-    def __enter__(self) -> "Tracer":
+    def __enter__(self):
         self.start()
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> bool:
+    def __exit__(self, exc_type, exc, tb):
         self.stop()
         return False
