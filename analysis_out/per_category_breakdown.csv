@@ -1,0 +1,7 @@
+category,n_objects,total_create_bytes,byte_seconds,pct_byte_seconds,n_reads,pct_reads,n_mutates
+kv_cache,44,883785728,2635953576.2,99.994,17,3.34,0
+system_prompt,20,8970,64307.7,0.002,88,17.29,0
+tool_result,68,17410,37501.7,0.001,156,30.65,0
+user_problem,20,2750,19715.4,0.001,88,17.29,0
+assistant_output,88,6474,16374.4,0.001,156,30.65,0
+file_content,24,2524,9343.3,0.0,4,0.79,20
