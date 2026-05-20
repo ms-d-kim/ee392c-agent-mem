@@ -47,8 +47,15 @@ TOOL_RE = re.compile(r"(?:```|~~~)(?:json)?\s*(\{.*?\})\s*(?:```|~~~)", re.DOTAL
 
 
 def parse_tool_call(text):
-    m = TOOL_RE.search(text)
-    return json.loads(m.group(1)) if m else None
+    """Find first JSON object inside a fenced code block, robust to trailing content."""
+    m = re.search(r"(?:```|~~~)(?:json)?\s*(\{[\s\S]*)", text)
+    if not m:
+        return None
+    try:
+        obj, _ = json.JSONDecoder().raw_decode(m.group(1))
+        return obj
+    except json.JSONDecodeError:
+        return None
 
 
 def _msg_oid_base(step, role, kind):
