@@ -1,7 +1,7 @@
 # EE 392C — Memory Lifetime Characterization of Coding-Agent Inference
 
 **Authors:** Minseok Kim, Kristen Guernsey
-**Course:** EE 392C — Differentiated Memory Systems, Stanford Spring 2026 (Tambe)
+**Course:** EE 392C — Differentiated Memory Systems, Stanford Spring 2026 (Professor Tambe)
 
 ## What this project is
 
