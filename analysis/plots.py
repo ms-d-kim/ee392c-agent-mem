@@ -77,6 +77,18 @@ LABEL = {
     "kv_cache":      "KV cache",
 }
 
+LIFE_BUCKETS = [
+    ("short", 0.0, 1.0, "#A7D8C8"),
+    ("medium", 1.0, 3.0, "#6FB39A"),
+    ("long", 3.0, float("inf"), "#2C7A62"),
+]
+
+MEMORY_CLASSES = [
+    ("short_term", ["kv_cache"], "#C66A32"),
+    ("medium_term", ["system_prompt", "user_problem", "assistant_output", "tool_result"], "#2C7A62"),
+    ("long_term", ["file_content"], "#3D5A98"),
+]
+
 
 def categorize(oid):
     if oid.startswith("msg_step0_system"): return "system_prompt"
@@ -391,6 +403,168 @@ def fig4_tier_diagram(out_base):
     print(f"  wrote {out_base.with_suffix('.png')}")
 
 
+def fig5_reuse_lifetime(traces_dir, out_base):
+    """Per-object reuse count vs lifetime across all traces."""
+    paths = sorted(glob.glob(f"{traces_dir}/*.jsonl"))
+    buckets = defaultdict(lambda: defaultdict(int))
+    for p in paths:
+        tr = load(p)
+        for o in tr["objects"]:
+            cat = o["category"]
+            if cat not in CATS:
+                continue
+            key = (round(o["lifetime"], 1), int(o["reads"]), int(o["size"]))
+            buckets[cat][key] += 1
+
+    fig, ax = plt.subplots(figsize=(8.5, 5.2))
+    for cat in CATS:
+        if cat not in buckets:
+            continue
+        xs, ys, sizes = [], [], []
+        for (x, y, size_bytes), n in buckets[cat].items():
+            xs.append(x)
+            ys.append(y)
+            # Bubble area encodes object size and count.
+            sizes.append(35 + 14 * (n ** 0.55) + 20 * ((max(size_bytes, 1) / 1024) ** 0.35))
+        ax.scatter(
+            xs,
+            ys,
+            s=sizes,
+            c=COLORS[cat],
+            alpha=0.45,
+            edgecolors=COLORS[cat],
+            linewidths=0.7,
+            label=LABEL[cat],
+        )
+
+    ax.set_xlim(-0.5, 13)
+    ax.set_ylim(-0.3, 13)
+    ax.set_xlabel("Lifetime (s)")
+    ax.set_ylabel("Reuse count (read events)")
+    ax.set_title("Reuse patterns vs data lifetimes across traces",
+                 loc="left", color="#666", pad=22)
+    leg = ax.legend(
+        loc="upper left",
+        bbox_to_anchor=(0, 1.04),
+        ncol=6,
+        handletextpad=0.4,
+        columnspacing=1.2,
+        borderaxespad=0,
+    )
+    for h in leg.legend_handles:
+        h.set_alpha(0.8)
+        h.set_sizes([70])
+    fig.savefig(out_base.with_suffix(".png"), facecolor="white")
+    fig.savefig(out_base.with_suffix(".svg"), facecolor="white")
+    plt.close(fig)
+    print(f"  wrote {out_base.with_suffix('.png')}")
+
+
+def fig6_reuse_hist_lifetime_stack(traces_dir, out_base):
+    """Reuse histogram stacked by lifetime bucket."""
+    paths = sorted(glob.glob(f"{traces_dir}/*.jsonl"))
+    objects = []
+    for p in paths:
+        tr = load(p)
+        objects.extend([o for o in tr["objects"] if o["category"] in CATS])
+    if not objects:
+        return
+
+    max_reads = max(int(o["reads"]) for o in objects)
+    xs = list(range(max_reads + 1))
+    counts_by_bucket = {name: [0 for _ in xs] for name, _, _, _ in LIFE_BUCKETS}
+
+    for o in objects:
+        reads = int(o["reads"])
+        lifetime = float(o["lifetime"])
+        for name, lo, hi, _ in LIFE_BUCKETS:
+            if lo <= lifetime < hi:
+                counts_by_bucket[name][reads] += 1
+                break
+
+    fig, ax = plt.subplots(figsize=(8.5, 5.0))
+    bottom = [0 for _ in xs]
+    for name, _, _, color in LIFE_BUCKETS:
+        vals = counts_by_bucket[name]
+        ax.bar(
+            xs,
+            vals,
+            bottom=bottom,
+            width=0.85,
+            color=color,
+            edgecolor=color,
+            alpha=0.9,
+            label=f"{name} lifetime",
+        )
+        bottom = [b + v for b, v in zip(bottom, vals)]
+
+    ax.set_xticks(xs)
+    ax.set_xlabel("Read count per object")
+    ax.set_ylabel("Number of objects")
+    ax.set_title("Reuse distribution with time-based lifetime composition",
+                 loc="left", color="#666", pad=22)
+    ax.legend(loc="upper right")
+    fig.savefig(out_base.with_suffix(".png"), facecolor="white")
+    fig.savefig(out_base.with_suffix(".svg"), facecolor="white")
+    plt.close(fig)
+    print(f"  wrote {out_base.with_suffix('.png')}")
+
+
+def fig7_reuse_hist_memory_class_stack(traces_dir, out_base):
+    """Reuse histogram stacked by conceptual memory class."""
+    paths = sorted(glob.glob(f"{traces_dir}/*.jsonl"))
+    objects = []
+    for p in paths:
+        tr = load(p)
+        objects.extend([o for o in tr["objects"] if o["category"] in CATS])
+    if not objects:
+        return
+
+    cat_to_class = {}
+    for class_name, cats, _ in MEMORY_CLASSES:
+        for c in cats:
+            cat_to_class[c] = class_name
+
+    max_reads = max(int(o["reads"]) for o in objects)
+    xs = list(range(max_reads + 1))
+    counts_by_class = {name: [0 for _ in xs] for name, _, _ in MEMORY_CLASSES}
+
+    for o in objects:
+        reads = int(o["reads"])
+        class_name = cat_to_class.get(o["category"])
+        if class_name is None:
+            continue
+        counts_by_class[class_name][reads] += 1
+
+    fig, ax = plt.subplots(figsize=(8.5, 5.0))
+    bottom = [0 for _ in xs]
+    for class_name, _, color in MEMORY_CLASSES:
+        vals = counts_by_class[class_name]
+        label = class_name.replace("_", " ")
+        ax.bar(
+            xs,
+            vals,
+            bottom=bottom,
+            width=0.85,
+            color=color,
+            edgecolor=color,
+            alpha=0.9,
+            label=label,
+        )
+        bottom = [b + v for b, v in zip(bottom, vals)]
+
+    ax.set_xticks(xs)
+    ax.set_xlabel("Read count per object")
+    ax.set_ylabel("Number of objects")
+    ax.set_title("Reuse distribution with conceptual memory-class composition",
+                 loc="left", color="#666", pad=22)
+    ax.legend(loc="upper right")
+    fig.savefig(out_base.with_suffix(".png"), facecolor="white")
+    fig.savefig(out_base.with_suffix(".svg"), facecolor="white")
+    plt.close(fig)
+    print(f"  wrote {out_base.with_suffix('.png')}")
+
+
 def main():
     traces_dir = sys.argv[1] if len(sys.argv) > 1 else "traces/batch_v2"
     out_dir = Path("figures")
@@ -400,6 +574,9 @@ def main():
     fig2_timeline(traces_dir, out_dir / "fig2_memory_pressure_timeline")
     fig3_dichotomy(traces_dir, out_dir / "fig3_capacity_vs_bandwidth")
     fig4_tier_diagram(out_dir / "fig4_dms_tier_proposal")
+    fig5_reuse_lifetime(traces_dir, out_dir / "fig5_reuse_vs_lifetime")
+    fig6_reuse_hist_lifetime_stack(traces_dir, out_dir / "fig6_reuse_hist_lifetime_stack")
+    fig7_reuse_hist_memory_class_stack(traces_dir, out_dir / "fig7_reuse_hist_memory_class_stack")
 
 
 if __name__ == "__main__":

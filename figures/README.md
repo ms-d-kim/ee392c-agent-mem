@@ -12,3 +12,10 @@ All figures rendered at 200 DPI PNG with companion SVG for editing.
 **fig3_capacity_vs_bandwidth** — Side-by-side: byte-seconds (capacity-time, log scale) vs read events (bandwidth demand, linear). The dichotomy — KV cache holds ~100% of byte-seconds but only 3% of reads; logical content holds <0.01% of byte-seconds but 97% of reads — is the core finding the report builds on.
 
 **fig4_dms_tier_proposal** — Proposed three-tier mapping for coding-agent inference (always-resident, bandwidth, capacity). Anchored to numbers from this 20-trace dataset, with explicit caveat about step-count scaling.
+
+**fig5_reuse_vs_lifetime** — Per-object reuse count (read events) vs lifetime across all traces. Bubble area scales with object size and multiplicity, making the high-reuse/short-lifetime vs low-reuse/long-lifetime split visually explicit for memory-tier mapping decisions.
+
+**fig6_reuse_hist_lifetime_stack** — Reuse histogram with x-axis as per-object read count and y-axis as number of objects, stacked by time-based lifetime buckets (short/medium/long). In this plot: short=[0,1)s, medium=[1,3)s, long=[3,inf)s.
+
+**fig7_reuse_hist_memory_class_stack** — Reuse histogram with x-axis as per-object read count and y-axis as number of objects, stacked by conceptual memory classes:
+short-term (`kv_cache`), medium-term (`system_prompt`, `user_problem`, `assistant_output`, `tool_result`), long-term (`file_content`).

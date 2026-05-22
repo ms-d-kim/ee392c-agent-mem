@@ -90,6 +90,46 @@ Anchored to the 20-trace dataset. Caveat: traces are 4–6 steps; the
 Tier-3 capacity argument scales with step count (20+ step agents amplify
 it considerably).
 
+### 4. Reuse and lifetime are coupled, but by category
+
+![Reuse vs lifetime](figures/fig5_reuse_vs_lifetime.png)
+
+The reuse-lifetime scatter shows that "hot" objects are not always large, and
+large objects are not always hot. In memory-system terms: small/high-reuse
+state (system prompt, current user/problem text, frequently revisited tool and
+assistant snippets) wants high-bandwidth volatile tiers (SRAM/HBM), while
+large/lower-reuse KV regions want capacity-oriented tiers (HBM/DDR, and
+eventually CXL-attached capacity).
+
+### 5. Reuse distribution with time-based lifetime buckets
+
+![Reuse histogram with lifetime composition](figures/fig6_reuse_hist_lifetime_stack.png)
+
+Lifetime buckets used in this figure are: **short** = [0, 1) seconds,
+**medium** = [1, 3) seconds, **long** = [3, inf) seconds.
+
+Stacking reuse counts by lifetime bucket makes the retention requirement
+explicit: most reused objects are short/medium lived, so low-latency volatile
+memory carries the critical path. Longer-lived low-reuse data is a better fit
+for larger, cheaper tiers (DDR or emerging NVM such as MRAM/RRAM if endurance
+and write-latency constraints are acceptable), where non-volatility and
+capacity matter more than peak bandwidth.
+
+### 6. Reuse distribution with conceptual memory classes
+
+![Reuse histogram with memory-class composition](figures/fig7_reuse_hist_memory_class_stack.png)
+
+This view uses the systems-oriented taxonomy directly: short-term = `kv_cache`,
+medium-term = `system_prompt` + `user_problem` + `assistant_output` +
+`tool_result`, long-term = `file_content`. It is a role-based mapping rather
+than a pure time-threshold mapping, and therefore better aligned with
+differentiated-tier design choices (bandwidth-critical volatile tiers vs
+capacity/retention-oriented tiers).
+
+Model weights are part of the long-term memory conceptually, but are not
+represented as per-object JSONL events in the current tracer and therefore do
+not appear in this figure.
+
 ## Repo layout
 
 ```
@@ -107,7 +147,7 @@ tasks/         Task fixtures (hello_bug, recursion_bug)
 
 - Tracer v2 + matrix runner + lifetime/per-category analysis: done
 - 20-trace batch + summary CSV + per-category CSV: in repo
-- Paper-ready figures (`figures/fig1`–`fig4`): in repo
+- Paper-ready figures (`figures/fig1`–`fig7`): in repo
 - Cross-step KV byte attribution (decompose per-step KV into
   system + history + new): pending (W4)
 - Final presentation + report: W5–W6
