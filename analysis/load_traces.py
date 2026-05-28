@@ -15,7 +15,7 @@ import pandas as pd
 from agent.tracer import SCHEMA_VERSION
 
 
-def load_trace(path: Path) -> pd.DataFrame:
+def load_trace(path: Path, *, expected_schema_version: int | None = SCHEMA_VERSION) -> pd.DataFrame:
     """Load a single JSONL trace into a DataFrame.
 
     Columns: ts, step, phase, object_id, logical_id, repr_type, size_bytes, op
@@ -28,6 +28,12 @@ def load_trace(path: Path) -> pd.DataFrame:
                 continue
             records.append(json.loads(line))
     df = pd.DataFrame(records)
+    if expected_schema_version is not None:
+        if "schema_version" not in df.columns:
+            raise ValueError(f"{path}: missing schema_version; pass expected_schema_version=None for legacy traces")
+        bad = sorted(df.loc[df["schema_version"] != expected_schema_version, "schema_version"].dropna().unique())
+        if bad:
+            raise ValueError(f"{path}: expected schema_version={expected_schema_version}, found {bad}")
     return df
 
 

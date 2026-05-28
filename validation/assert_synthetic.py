@@ -25,6 +25,7 @@ TEST_OUTPUT_CONTENT = "test_output: 1 passed"
 SAMPLE_PERIOD_SECONDS = 0.1
 
 REQUIRED_FIELDS = {
+    "schema_version",
     "ts",
     "step",
     "phase",
@@ -34,6 +35,7 @@ REQUIRED_FIELDS = {
     "size_bytes",
     "op",
 }
+EXPECTED_SCHEMA_VERSION = 3
 
 
 def _logical_id(content: str) -> str:
@@ -55,6 +57,11 @@ def _load_events(path: str) -> tuple[list[dict], list[str]]:
                 missing = sorted(REQUIRED_FIELDS - set(event))
                 if missing:
                     errors.append(f"line {line_no}: missing fields {missing}")
+                if event.get("schema_version") != EXPECTED_SCHEMA_VERSION:
+                    errors.append(
+                        f"line {line_no}: schema_version={event.get('schema_version')!r}, "
+                        f"expected {EXPECTED_SCHEMA_VERSION}"
+                    )
                 events.append(event)
     except OSError as exc:
         errors.append(str(exc))
@@ -196,6 +203,36 @@ def _logical_ids_stable_before_mutate(events: list[dict], expected_v1_id: str) -
     )
 
 
+def _kv_events_have_v3_fields(events: list[dict]) -> bool:
+    required = {
+        "semantic_type",
+        "source",
+        "token_offset_start",
+        "token_offset_end",
+        "token_count",
+        "confidence",
+        "kv_bytes_per_token",
+    }
+    kv_events = [event for event in events if event.get("repr_type") == "kv_estimated"]
+    return bool(kv_events) and all(required <= set(event) for event in kv_events)
+
+
+def _mutates_create_new_logical_versions(events: list[dict]) -> bool:
+    live_logical = {}
+    for event in events:
+        oid = event["object_id"]
+        op = event["op"]
+        lid = event["logical_id"]
+        if op == "create":
+            live_logical[oid] = lid
+        elif op == "mutate":
+            previous = live_logical.get(oid)
+            if previous is not None and previous == lid:
+                return False
+            live_logical[oid] = lid
+    return True
+
+
 def _print_result(name: str, passed: bool, actual, expected) -> bool:
     status = "PASS" if passed else "FAIL"
     print(f"{status} {name}: actual={actual!r} expected={expected!r}")
@@ -304,6 +341,18 @@ def main(argv: list[str]) -> int:
             not duplication_errors,
             duplication_errors,
             [],
+        ),
+        _print_result(
+            "kv_events_have_v3_fields",
+            _kv_events_have_v3_fields(events),
+            "present" if _kv_events_have_v3_fields(events) else "missing",
+            "semantic/span/confidence fields on KV events",
+        ),
+        _print_result(
+            "mutates_create_new_logical_versions",
+            _mutates_create_new_logical_versions(events),
+            "new versions" if _mutates_create_new_logical_versions(events) else "collapsed",
+            "mutate changes logical_id",
         ),
     ]
 

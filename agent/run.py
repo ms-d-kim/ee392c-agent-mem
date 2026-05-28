@@ -5,7 +5,8 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from agent.tracer import Tracer, compute_logical_id
 
 MAX_STEPS = 15
-MODEL_PATH = "/workspace/models/qwen-coder-7b"
+MODEL_PATH = "/workspace/hf-cache/Qwen2.5-Coder-7B-Instruct"
+DEFAULT_MODEL_ID = "Qwen/Qwen2.5-Coder-7B-Instruct"
 TASK_DIR = Path("tasks/hello_bug")
 TRACE_OUT = Path("traces/hello_bug_run2.jsonl")
 
@@ -71,9 +72,10 @@ def main():
     (TASK_DIR / "src" / "math_utils.py").write_text(BUGGY_SRC)
 
     print("Loading model...")
-    tok = AutoTokenizer.from_pretrained(MODEL_PATH)
+    model_source = MODEL_PATH if Path(MODEL_PATH).exists() else DEFAULT_MODEL_ID
+    tok = AutoTokenizer.from_pretrained(model_source)
     model = AutoModelForCausalLM.from_pretrained(
-        MODEL_PATH, torch_dtype=torch.bfloat16, device_map="auto"
+        model_source, torch_dtype=torch.bfloat16, device_map="auto"
     ).eval()
     print(f"Model on {next(model.parameters()).device}")
 
@@ -85,7 +87,7 @@ def main():
     TRACE_OUT.parent.mkdir(parents=True, exist_ok=True)
 
     with Tracer(output_path=str(TRACE_OUT)) as tracer:
-        emit_text(tracer, 0, "setup", "problem", problem)
+        emit_text(tracer, 0, "task_setup", "problem", problem)
 
         for step in range(1, MAX_STEPS + 1):
             prompt_text = tok.apply_chat_template(

@@ -1,0 +1,5 @@
+error reports mention payment timeout during bank redirects.
+database retry logs contain failure, request, token, and session strings.
+user notification workers retry failed email deliveries.
+cache prefetch jobs mention broad timeout and error counters.
+search index workers report failed shard movement during deploys.

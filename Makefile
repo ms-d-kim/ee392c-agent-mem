@@ -17,6 +17,7 @@ help:
 	@echo "  make cycle2-cx    Cycle 2 step 2: Codex writes adversarial assertions"
 	@echo ""
 	@echo "  make verify       Run the synthetic test and assertions"
+	@echo "  make verify-v3    Dry-run final-v3 traces, validate, and analyze"
 	@echo "  make status       Show recent [CC]/[CX]/[H] commits"
 	@echo ""
 
@@ -118,6 +119,19 @@ verify:
 	@echo "Running adversarial assertions..."
 	python3 validation/assert_synthetic.py traces/synthetic.jsonl
 
+verify-v3:
+	@echo "WARNING: verify-v3 uses dry-run traces. Dry-run byte-seconds are tracer-overhead-bound"
+	@echo "and must not be used for paper figures or cross-condition claims."
+	@echo ""
+	@echo "Running final-v3 dry-run traces..."
+	python3 -m agent.run_final_v3 --all --dry-run --out-dir /tmp/final_v3_dryrun
+	@echo ""
+	@echo "Validating final-v3 dry-run traces..."
+	python3 -m validation.validate_final_v3 /tmp/final_v3_dryrun/*.jsonl
+	@echo ""
+	@echo "Analyzing final-v3 dry-run traces..."
+	python3 -m analysis.final_v3 /tmp/final_v3_dryrun /tmp/final_v3_analysis /tmp/final_v3_figures
+
 status:
 	@echo ""
 	@echo "Recent ping-pong commits:"
@@ -125,4 +139,4 @@ status:
 	@git log --oneline 2>/dev/null | grep -E "\[(CC|CX|H)\]" | head -20 || echo "No tagged commits yet."
 	@echo ""
 
-.PHONY: help cycle1-cc cycle1-cx cycle2-cc cycle2-cx verify status
+.PHONY: help cycle1-cc cycle1-cx cycle2-cc cycle2-cx verify verify-v3 status

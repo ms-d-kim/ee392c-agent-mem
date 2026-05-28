@@ -23,7 +23,8 @@ from vllm import LLM, SamplingParams
 from agent.tracer import Tracer, compute_logical_id
 
 MAX_STEPS = 15
-MODEL_PATH = "/workspace/models/qwen-coder-7b"
+MODEL_PATH = "/workspace/hf-cache/Qwen2.5-Coder-7B-Instruct"
+DEFAULT_MODEL_ID = "Qwen/Qwen2.5-Coder-7B-Instruct"
 KV_BYTES_PER_TOKEN = 2 * 28 * 4 * 128 * 2
 
 SYSTEM_PROMPT = """You are a coding agent with three tools:
@@ -44,6 +45,10 @@ When done, respond with:
 One tool per turn. Preserve all existing functions when editing. Be concise."""
 
 TOOL_RE = re.compile(r"(?:```|~~~)(?:json)?\s*(\{.*?\})\s*(?:```|~~~)", re.DOTALL)
+
+
+def resolve_model_source() -> str:
+    return MODEL_PATH if Path(MODEL_PATH).exists() else DEFAULT_MODEL_ID
 
 
 def parse_tool_call(text):
@@ -169,8 +174,9 @@ def get_cached_tokens(out):
 def run_agent(*, task_dir, out_path, prefix_caching, temperature, llm=None, tok=None):
     reset_task_fixture(task_dir)
     if llm is None:
-        tok = AutoTokenizer.from_pretrained(MODEL_PATH)
-        llm = LLM(model=MODEL_PATH, dtype="bfloat16", max_model_len=4096,
+        model_source = resolve_model_source()
+        tok = AutoTokenizer.from_pretrained(model_source)
+        llm = LLM(model=model_source, dtype="bfloat16", max_model_len=4096,
                   gpu_memory_utilization=0.85, enable_prefix_caching=prefix_caching)
     sampling = SamplingParams(temperature=temperature, max_tokens=512, seed=42)
 

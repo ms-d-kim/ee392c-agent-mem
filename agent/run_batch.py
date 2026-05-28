@@ -20,7 +20,7 @@ import torch
 from transformers import AutoTokenizer
 from vllm import LLM
 
-from agent.run_vllm import MODEL_PATH, run_agent
+from agent.run_vllm import resolve_model_source, run_agent
 
 TASKS = ["hello_bug", "recursion_bug"]
 TEMPS = [0.0, 0.3, 0.5, 0.7, 1.0]
@@ -30,14 +30,15 @@ OUT_DIR = Path("traces/batch_v2")
 
 def run_matrix():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    tok = AutoTokenizer.from_pretrained(MODEL_PATH)
+    model_source = resolve_model_source()
+    tok = AutoTokenizer.from_pretrained(model_source)
 
     for prefix_caching in CACHE_MODES:
         cache_label = "cache_on" if prefix_caching else "cache_off"
         t0 = time.time()
         print(f"\n========== Loading vLLM (prefix_caching={prefix_caching}) ==========")
         llm = LLM(
-            model=MODEL_PATH, dtype="bfloat16", max_model_len=4096,
+            model=model_source, dtype="bfloat16", max_model_len=4096,
             gpu_memory_utilization=0.85, enable_prefix_caching=prefix_caching,
         )
         print(f"loaded in {time.time() - t0:.1f}s")

@@ -1,0 +1,8 @@
+00:01 gateway accepted deploy build 4472.
+00:02 auth service latency increased from 80 ms to 900 ms.
+00:03 token refresh error count rose for mobile clients.
+00:04 retry queue depth doubled after refresh failures.
+00:05 unrelated analytics export started a large backfill.
+00:06 memory pressure warning appeared on the auth workers.
+00:07 refresh endpoint returned timeout for account batches.
+00:08 rollback was considered but not started.

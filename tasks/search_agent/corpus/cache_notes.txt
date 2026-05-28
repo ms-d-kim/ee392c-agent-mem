@@ -1,0 +1,5 @@
+cache invalidation runs every ten minutes for product metadata.
+session cache stores nonce, refresh timestamp, and account id.
+cache misses are expected during deploys and are not auth failures.
+user profile cache can return stale locale data after migration.
+unrelated error: product cache warmup can saturate redis on boot.

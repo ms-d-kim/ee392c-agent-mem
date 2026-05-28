@@ -1,0 +1,5 @@
+auth middleware validates bearer tokens before each request.
+token refresh happens when session age exceeds twenty minutes.
+known issue: refresh retries can reuse an expired session nonce.
+mitigation: retry token refresh with a fresh nonce and record the attempt id.
+unrelated: password reset emails are rate limited by account id.

@@ -9,10 +9,12 @@ finding forces it. Document any change here with date and reason.
 
 **Decision:** Use the analytical estimate, not BlockManager hooks:
 ```
-kv_bytes ≈ 2 × n_layers × hidden_dim × n_tokens × dtype_bytes
+kv_bytes ≈ 2 × n_layers × n_kv_heads × head_dim × n_tokens × dtype_bytes
 ```
-For Qwen2.5-Coder-7B-Instruct: 28 layers × 3584 hidden_dim × bfloat16 (2 bytes)
-→ kv_bytes ≈ 2 × 28 × 3584 × n_tokens × 2 = ~401 KB/token.
+For Qwen2.5-Coder-7B-Instruct with grouped-query attention:
+28 layers × 4 KV heads × 128 head_dim × bfloat16 (2 bytes)
+→ kv_bytes ≈ 2 × 28 × 4 × 128 × n_tokens × 2 = 57,344 bytes/token
+(~56 KiB/token).
 
 **Why:** vLLM V1 KVCacheManager hook surface is not stable enough for a 5-day
 timeline. Block-level events would be nice-to-have but the analytical estimate
@@ -34,15 +36,18 @@ lifetime(obj) = min(t_last_access, t_task_end) - t_first_observation
 
 **Sensitivity alternatives** (one supplementary plot in the report):
 - **Strict KV-residence lifetime** — block allocation to block free/eviction
+- **Prompt-step KV lifetime** — duration a projected KV span remains relevant
+  until the next prefill boundary
 - **Context-window lifetime** — duration the object remained in the prompt context
 
 **Axes:** report both wall-clock seconds and step-count-normalized lifetime.
 Step-count is the more useful cross-task comparison axis.
 
-**Why this primary:** captures "how long the system cares about an object,
-regardless of representation." Other definitions are too narrow (KV-residence
-ignores text/token reuse) or too broad (context-window doesn't reflect actual
-access).
+**Final-v3 convention:** text/token objects use logical presence. Per-step
+`kv_estimated` prompt spans are bounded at the next prefill boundary because
+they are analytical snapshots of prompt construction, not measured resident
+blocks. This avoids presenting task-end-bounded KV byte-seconds as physical
+no-eviction occupancy.
 
 ---
 
@@ -94,17 +99,30 @@ on one task beats a half-instrumented pitch on five.
 
 ---
 
-## 6. Workload scope: 3 tools, hard step cap 15
+## 6. Workload scope: final-v3 scripted workflow replays
 
-**Tools:** `read_file`, `write_file`, `run_tests`
+**Final-v3 traces:** 3 workload families × 2 contrast traces = 6 traces.
+
+**Workload families:**
+- `coding_agent`: read/edit/test workflow replay, cache on vs off
+- `search_agent`: iterative grep/retrieval replay, targeted vs broad retrieval
+- `compaction_agent`: context-growth compaction replay, compaction on vs off
+
+These are deterministic multi-step agent-workflow replays, not autonomous
+tool-selection loops. The LLM output is still generated and included in prompt
+history, but tool choices are scripted to make memory-shape comparisons
+repeatable. Search and compaction use small checked-in seed fixtures expanded
+deterministically at runtime so the prompt shape is large enough to exercise the
+intended memory behavior without committing bulky generated text.
+
+**Legacy v2 tools:** `read_file`, `write_file`, `run_tests`
 **Step cap:** 15 per task
-**Tasks:** 30–50 SWE-bench-lite-style (revised up from proposal's 5–10 to
-support distributional claims with bootstrap CIs)
+**Statistical scope:** characterization only. There is no within-condition
+replication, so do not use bootstrap CIs or significance language.
 
-**Why simple:** memory patterns must be interpretable, not optimal for solve
-rate. Production coding agents (Claude Code, Cursor) use complex
-context-management and retrieval that would muddy the trace. This is an
-explicit scoping choice, not a hidden limitation.
+**Why simple:** memory patterns must be interpretable and repeatable, not
+optimized for solve rate. The headline is cross-workload variability of
+semantic memory behavior, with mechanisms attached to each observed difference.
 
 ---
 

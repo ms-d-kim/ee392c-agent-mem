@@ -146,17 +146,16 @@ issues), append them to `TROUBLESHOOTING.md` in the repo root and commit.
 
 ---
 
-## Next session — implementation order
+## Next session — final-v3 run order
 
-Once the bring-up runbook above succeeds end-to-end, implementation order is:
+Once the bring-up runbook above succeeds end-to-end, use the final-v3 path:
 
-1. **`agent/tracer.py`** — implement the `Tracer` class against the schema docstring.
-2. **`serving/telemetry.py`** — implement `SystemTelemetry` (NVML + psutil + threading).
-3. **`agent/tools.py`** + **`agent/graph.py`** — minimal LangGraph 3-tool agent.
-4. **`validation/synthetic.py`** — implement the synthetic agent run.
-5. **Run `validation/synthetic.py` and verify expected values** before any real trace.
-6. **`analysis/load_traces.py`** + plotting — first lifetime CDF on synthetic data.
-7. **First real SWE-bench task trace.**
+1. Run `python -m validation.synthetic --output /tmp/synthetic_v3.jsonl`.
+2. Run `python -m validation.assert_synthetic /tmp/synthetic_v3.jsonl`.
+3. Run one real final-v3 trace with `agent.run_final_v3` and verify
+   `validation.validate_final_v3` does not report cached-token API unavailable.
+4. Run all six final-v3 traces under `traces/final_v3/`.
+5. Run `analysis.final_v3` to produce final CSVs and figures.
 
-Do step 5 carefully. If the tracer fails on synthetic, every plot from real
-traces is suspect.
+The synthetic gate remains mandatory. If it fails, every plot from real traces
+is suspect.

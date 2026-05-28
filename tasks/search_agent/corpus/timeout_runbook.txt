@@ -1,0 +1,5 @@
+timeout alarms fire when gateway requests exceed five seconds.
+error budget reports include database timeout, cache timeout, and auth timeout.
+auth timeout after token refresh usually indicates retry fanout.
+recommended mitigation is exponential backoff plus a single-flight refresh lock.
+unrelated: image upload timeout is tracked by the media pipeline.

@@ -1,9 +1,9 @@
 """
-analysis/per_category.py — bandwidth vs capacity dichotomy.
+analysis/per_category.py — logical access vs capacity-time dichotomy.
 
 Categorizes objects (system_prompt, user_problem, assistant_output, tool_result,
-file_content, kv_cache) and computes byte-seconds and read-event share per
-category, across an arbitrary set of traces.
+file_content, kv_cache) and computes byte-seconds and logical read-event share
+per category, across an arbitrary set of traces.
 
 Usage:
     python -m analysis.per_category traces/batch_v2/hello_bug_*.jsonl
@@ -19,7 +19,12 @@ from collections import defaultdict
 from pathlib import Path
 
 
-def categorize(oid: str) -> str:
+def categorize(event_or_oid) -> str:
+    if isinstance(event_or_oid, dict) and event_or_oid.get("repr_type") == "kv_estimated":
+        return "kv_cache"
+    if isinstance(event_or_oid, dict) and event_or_oid.get("semantic_type"):
+        return event_or_oid["semantic_type"]
+    oid = event_or_oid["object_id"] if isinstance(event_or_oid, dict) else event_or_oid
     if oid.startswith("msg_step0_system"):
         return "system_prompt"
     if oid.startswith("msg_step0_user_problem"):
@@ -56,7 +61,7 @@ def per_category(trace_paths):
             mutates = [e for e in evs if e["op"] == "mutate"]
             last_access = max((e["ts"] for e in reads + mutates), default=task_end)
             lifetime = max(0.0, last_access - c0["ts"])
-            cat = categorize(oid)
+            cat = categorize(c0)
             agg[cat]["byte_seconds"] += c0["size_bytes"] * lifetime
             agg[cat]["n_reads"] += len(reads)
             agg[cat]["n_mutates"] += len(mutates)

@@ -1,56 +1,59 @@
-# EE 392C — Memory Lifetime Characterization of Coding-Agent Inference
+# EE 392C — Memory Lifetime Characterization of LLM Agent-Workflow Replays
 
 **Authors:** Minseok Kim, Kristen Guernsey
 **Course:** EE 392C — Differentiated Memory Systems, Stanford Spring 2026 (Professor Tambe)
 
 <p align="center">
-  <img src="figures/fig3_capacity_vs_bandwidth.png" alt="Capacity vs bandwidth dichotomy" width="92%">
+  <img src="figures/fig3_capacity_vs_bandwidth.png" alt="Capacity-time vs logical read events" width="92%">
   <br>
-  <em>KV cache and logical content live on opposite ends of the capacity-vs-bandwidth axis.<br>
+  <em>KV cache and logical content live on opposite ends of the capacity-time vs logical-access axis.<br>
   This is the dichotomy that motivates a tiered mapping.</em>
 </p>
 
 ## What this project is
 
-We characterize memory access patterns in a small, instrumented coding-agent
-inference workload, with the goal of informing how application-level data
-classes should map onto a tiered (differentiated) memory system. The work
-measures lifetime, reuse, footprint, and per-category bandwidth-vs-capacity
-demand of agent state, and proposes a prescriptive tier mapping based on
-observed patterns.
+We characterize memory access patterns in instrumented LLM workflow traces,
+with the goal of informing how application-level data classes should map onto a
+tiered (differentiated) memory system. The final artifact uses deterministic
+multi-step **agent-workflow replays**: coding, search/retrieval, and
+context-growth compaction. The headline is cross-workload variability: the same
+semantic class can have different lifetime, reuse, token, KV, and duplication
+behavior depending on workflow shape.
 
 This is exploratory characterization, not a generalizable benchmark. Findings
-are tightly coupled to our specific configuration (Qwen-Coder 7B + vLLM 0.6.6
-+ a minimal ReAct-style harness) and a small task set; the framing
-"a representative coding-agent configuration" is honest, "coding-agent
-inference broadly" is overclaiming.
+are tightly coupled to Qwen2.5-Coder-7B-Instruct + vLLM and a small replay set.
+The framing "scripted agent-workflow replays with agent-like prompt/tool
+structure" is honest; "autonomous production agents broadly" is overclaiming.
 
 ## Stack
 
-- **Agent:** Minimal ReAct-style harness (~140 LOC, `agent/run_vllm.py`)
-  with three tools (`read_file`, `write_file`, `run_tests`) and a
-  fenced-JSON tool-call protocol
+- **Final artifact:** `agent/run_final_v3.py`, six deterministic
+  agent-workflow replay traces
+- **Historical v2 batch:** Minimal ReAct-style harness (`agent/run_vllm.py`)
+  with three tools (`read_file`, `write_file`, `run_tests`) and a fenced-JSON
+  tool-call protocol
 - **Engine:** vLLM 0.6.6.post1 + Qwen2.5-Coder-7B-Instruct
-- **Compute:** RunPod L4 24GB (Ada sm_89)
-- **Tasks:** 2 hand-crafted fixtures (`hello_bug`, `recursion_bug`) ×
+- **Compute:** RunPod RTX 4090 24GB (Ada sm_89)
+- **Historical v2 tasks:** 2 hand-crafted fixtures (`hello_bug`, `recursion_bug`) ×
   5 sampling temperatures × 2 cache modes (prefix caching on/off) = 20 traces
 
 ## Telemetry — logical layer
 
-JSONL events from the agent code:
+JSONL events from the workflow/replay code:
 
 ```
-{ts, step, phase, object_id, logical_id, repr_type, size_bytes, op}
+{schema_version, ts, step, phase, object_id, logical_id, repr_type, size_bytes, op}
 ```
 
-Schema is v2 (runtime enum validation in `agent/tracer.py`). Each event
-records one create / read / mutate / free on a logical object across three
-representations: text, tokens, kv_estimated.
+Schema v3 is additive over v2 (runtime validation in `agent/tracer.py`). Each
+event records one create / read / mutate / free on a logical object across
+representations such as text, tokens, and analytically projected KV. v3 can also
+carry `semantic_type`, `source`, token-span offsets, token count, and confidence.
 
 What we are **not** tracking: Nsight Compute kernel counters, DRAM bandwidth
-aggregates, HBM internals, cross-tier offload dynamics. The tier mapping is
-*prescriptive* (argued from logical access patterns + published memory-tech
-specs), not measured.
+aggregates, SRAM/L1/L2 behavior, actual HBM residency, or cross-tier migration.
+The tier mapping is *prescriptive* from logical semantic/token/KV observations,
+not measured physical placement.
 
 ## Headline metrics
 
@@ -58,12 +61,19 @@ specs), not measured.
 2. **Reuse count** — accesses after creation
 3. **Memory footprint over time** — bytes per category, time series
 4. **Byte-seconds** — size × lifetime (capacity-time pressure)
-5. **Per-category bandwidth-vs-capacity split** — read events vs byte-seconds
+5. **Per-category logical access-vs-capacity split** — logical read events vs byte-seconds
    per category (this is the novel angle vs GainSight: GainSight measures
    activation lifetime within a single forward pass; we measure logical-object
-   lifetime across agent steps)
+   lifetime across workflow steps)
 
 ## Headline findings
+
+### Historical v2 findings
+
+The original v2 batch remains useful background, but the final report should use
+fresh v3 traces for cross-workload claims. v2 duplication factors are historical
+only: v2 assigned KV logical IDs at full-prompt granularity, so cross-representation
+duplication is not meaningfully measurable from that batch.
 
 ### 1. Two object populations, six orders of magnitude apart in size
 
@@ -80,15 +90,15 @@ They will never be well-served by a single memory tier.
 Across one task (`hello_bug`, cache_on, t=0.0), live KV grows step-wise to
 42 MB while live logical content stays under 2 KB. Aggregated across all 20
 traces (chart at top of README), KV holds **99.994% of byte-seconds but only
-3.3% of read events**; logical content inverts that ratio.
+3.3% of logical read events**; logical content inverts that ratio. This is not
+a hardware bandwidth measurement.
 
 ### 3. Proposed three-tier mapping
 
-![DMS tier proposal](figures/fig4_dms_tier_proposal.png)
+![DMS tier proposal](figures/fig4_dms_tier_proposal.svg)
 
-Anchored to the 20-trace dataset. Caveat: traces are 4–6 steps; the
-Tier-3 capacity argument scales with step count (20+ step agents amplify
-it considerably).
+Anchored to the historical 20-trace v2 dataset. Caveat: tier labels are
+prescriptive from logical traces, not measured SRAM/HBM residency.
 
 ### 4. Reuse and lifetime are coupled, but by category
 
@@ -99,7 +109,8 @@ large objects are not always hot. In memory-system terms: small/high-reuse
 state (system prompt, current user/problem text, frequently revisited tool and
 assistant snippets) wants high-bandwidth volatile tiers (SRAM/HBM), while
 large/lower-reuse KV regions want capacity-oriented tiers (HBM/DDR, and
-eventually CXL-attached capacity).
+eventually CXL-attached capacity). This is a placement prescription, not a
+measured SRAM/HBM residency result.
 
 ### 5. Reuse distribution with time-based lifetime buckets
 
@@ -143,14 +154,55 @@ figures/       Paper-ready figures + standalone SVGs
 tasks/         Task fixtures (hello_bug, recursion_bug)
 ```
 
-## Status (May 20, 2026)
+## Status (May 28, 2026)
 
-- Tracer v2 + matrix runner + lifetime/per-category analysis: done
+- Tracer v3 additive schema + final-v3 replay runner: in local implementation
 - 20-trace batch + summary CSV + per-category CSV: in repo
-- Paper-ready figures (`figures/fig1`–`fig7`): in repo
-- Cross-step KV byte attribution (decompose per-step KV into
-  system + history + new): pending (W4)
+- Historical paper-ready v2 figures (`figures/fig1`–`fig7`): in repo
+- Final-v3 traces should be regenerated under `traces/final_v3/`
+- Optional system telemetry is auxiliary; final claims should not depend on it
 - Final presentation + report: W5–W6
+
+## Final v3 artifact path
+
+The final report artifact should use fresh schema-v3 traces in
+`traces/final_v3/`, not the historical `traces/batch_v2/` batch. The v3 path
+profiles three structurally distinct scripted agent-workflow replays with two
+contrast traces each:
+
+- `coding_agent`: prefix-cache on (matched default) vs off
+- `search_agent`: targeted retrieval (matched default) vs broad/noisy retrieval
+- `compaction_agent`: compaction on (matched default) vs off
+
+The second trace in each pair is an ablation, not a replicate. Do not report CIs
+or significance tests from these six traces. The search and compaction replays
+expand small seed fixtures deterministically at runtime so prompt shape is large
+enough to stress retrieval/compaction without storing bulky synthetic files.
+
+```
+python3 -m agent.run_final_v3 --all --out-dir traces/final_v3 \
+  --system-telemetry-dir traces/final_v3_system
+python3 -m validation.validate_final_v3 traces/final_v3/*.jsonl
+python3 -m analysis.final_v3 traces/final_v3
+```
+
+For local validation without vLLM:
+
+```
+python3 -m agent.run_final_v3 --all --dry-run --out-dir /tmp/final_v3_dryrun
+python3 -m validation.validate_final_v3 /tmp/final_v3_dryrun/*.jsonl
+```
+
+Dry-run traces validate schema and attribution plumbing only. Their
+byte-seconds are dominated by local tracing overhead and must not be used for
+paper figures or cross-condition claims.
+
+Schema v3 is additive: all v2 lifecycle fields remain, and events can also
+carry `semantic_type`, `source`, token-span offsets, token count, and confidence.
+KV pressure is a GQA-aware analytical projection derived from model config. KV
+span byte-seconds are bounded at the next prefill boundary. Cache-adjusted KV
+uses vLLM cached-token counters when available and assumes cached prefixes are
+contiguous leading spans. Actual physical HBM residency is not claimed.
 
 ## Key dates
 

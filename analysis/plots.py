@@ -90,7 +90,12 @@ MEMORY_CLASSES = [
 ]
 
 
-def categorize(oid):
+def categorize(event_or_oid):
+    if isinstance(event_or_oid, dict) and event_or_oid.get("repr_type") == "kv_estimated":
+        return "kv_cache"
+    if isinstance(event_or_oid, dict) and event_or_oid.get("semantic_type"):
+        return event_or_oid["semantic_type"]
+    oid = event_or_oid["object_id"] if isinstance(event_or_oid, dict) else event_or_oid
     if oid.startswith("msg_step0_system"): return "system_prompt"
     if oid.startswith("msg_step0_user_problem"): return "user_problem"
     if "_assistant_" in oid: return "assistant_output"
@@ -117,7 +122,7 @@ def load(path):
         mutates = [e for e in evs if e["op"] == "mutate"]
         last_access = max((e["ts"] for e in reads + mutates), default=task_end)
         objects.append({
-            "oid": oid, "category": categorize(oid),
+            "oid": oid, "category": categorize(c0),
             "size": c0["size_bytes"], "create_ts": c0["ts"],
             "last_access_ts": last_access,
             "lifetime": max(0.0, last_access - c0["ts"]),
@@ -288,7 +293,7 @@ def fig3_dichotomy(traces_dir, out_base):
     a2.set_yticks(y, labels=labels)
     a2.set_xlim(0, max_rd * 1.25)
     a2.set_xlabel("Read events (count)")
-    a2.set_title("Bandwidth demand", loc="left", color="#444")
+    a2.set_title("Logical read events", loc="left", color="#444")
     a2.invert_yaxis()
     a2.grid(axis="y", alpha=0)
 
@@ -298,7 +303,7 @@ def fig3_dichotomy(traces_dir, out_base):
         a2.text(rd[c] + max_rd * 0.02, i, _fmt_pct(pct),
                 va="center", fontsize=9, color="#555")
 
-    fig.suptitle("Same data, two axes: capacity vs bandwidth",
+    fig.suptitle("Same data, two axes: capacity-time vs logical reads",
                  x=0.06, y=1.02, ha="left", fontsize=12.5, color="#666")
     fig.savefig(out_base.with_suffix(".png"), facecolor="white")
     fig.savefig(out_base.with_suffix(".svg"), facecolor="white")
@@ -319,21 +324,21 @@ def fig4_tier_diagram(out_base):
         {
             "y_bot": 7.4, "y_top": 9.0,
             "fill": "#FAECE7", "edge": "#7C2D14",
-            "title": "Tier 1 — Always-resident (SRAM / pinned HBM)",
+            "title": "Tier 1 — Always-resident (highest-bandwidth proposed tier)",
             "body": "System prompt + user problem",
             "spec": "Size ~600 B  ·  Lifetime = full task  ·  Read every step",
         },
         {
             "y_bot": 5.0, "y_top": 6.6,
             "fill": "#FBF1DC", "edge": "#7C5510",
-            "title": "Tier 2 — Bandwidth tier (HBM)",
+            "title": "Tier 2 — Bandwidth-oriented tier",
             "body": "Active KV (current + next step), recent messages",
             "spec": "10–25 MB per step  ·  Lifetime 1–2 steps  ·  61% of reads",
         },
         {
             "y_bot": 2.6, "y_top": 4.2,
             "fill": "#E6F1FB", "edge": "#0C447C",
-            "title": "Tier 3 — Capacity tier (DDR / CXL / NVMe)",
+            "title": "Tier 3 — Capacity-oriented tier (DDR / CXL / NVMe)",
             "body": "KV blocks past their next-read window",
             "spec": "Migratable once cache-hit consumed  ·  ~100% byte-seconds  ·  3% of reads",
         },
@@ -383,18 +388,18 @@ def fig4_tier_diagram(out_base):
             ha="center", va="center", style="italic")
 
     # Title + subtitle
-    ax.text(6.0, 10.1, "Proposed tier mapping for coding-agent inference",
+    ax.text(6.0, 10.1, "Proposed prescriptive tier mapping for coding-agent inference",
             fontsize=13, color="#222", ha="center", va="center",
             fontweight="medium")
-    ax.text(6.0, 9.65, "anchored to 20-trace dataset (Qwen2.5-Coder-7B, vLLM 0.6.6, L4 24 GB)",
+    ax.text(6.0, 9.65, "anchored to 20-trace v2 dataset (Qwen2.5-Coder-7B, vLLM 0.6.6, RTX 4090 24 GB)",
             fontsize=10, color="#888", ha="center", va="center", style="italic")
 
     # Caveat
     ax.text(BOX_LEFT, 1.7,
-            "Caveat: traces are 4–6 steps; Tier 3 capacity benefit scales with step count.",
+            "Caveat: tier labels are prescriptions from logical traces, not measured SRAM/HBM residency.",
             fontsize=9, color="#888", va="center", style="italic")
     ax.text(BOX_LEFT, 1.2,
-            "On 20+ step agents (SWE-bench-style), Tier 3 byte-seconds dominate further.",
+            "MB/step and read-share annotations come from the historical v2 batch.",
             fontsize=9, color="#888", va="center", style="italic")
 
     fig.savefig(out_base.with_suffix(".png"), facecolor="white", dpi=200)

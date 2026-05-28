@@ -23,3 +23,7 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Adversarial ping-pong review outputs (driver script reviews/pingpong/run.sh stays tracked)
+reviews/pingpong/round_*.md
+reviews/pingpong/run.log

@@ -1,0 +1,6 @@
+00:17 patch enabled single-flight refresh lock.
+00:18 new token refresh attempts generated fresh nonce values.
+00:19 auth timeout rate dropped within three minutes.
+00:20 retry queue drained without restarting workers.
+00:21 database and media services stayed healthy.
+00:22 mitigation note: keep single-flight lock and add nonce freshness metric.
