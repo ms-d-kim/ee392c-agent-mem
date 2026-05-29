@@ -142,4 +142,4 @@ def update_hash_with_normalized_content(h: "hashlib._Hash", content: str) -> Non
 
 ## Commit Message
 
-`[CX] Review agent/tracer.py against the JSONL schema contract, thread-safety expectations, crash-resilience requirements, logical-id normalization edge cases, lifecycle/file-handle safety, and runtime type-validation gaps.`
+`Review agent/tracer.py against the JSONL schema contract, thread-safety expectations, crash-resilience requirements, logical-id normalization edge cases, lifecycle/file-handle safety, and runtime type-validation gaps.`

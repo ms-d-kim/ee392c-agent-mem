@@ -30,4 +30,4 @@ For each finding, include:
 
 Save the review as reviews/01-tracer-review.md. Do not modify agent/tracer.py.
 
-After saving, write a commit message starting with [CX] describing what you reviewed.
+After saving, write a commit message describing what you reviewed. Do not include tool/vendor authorship tags.

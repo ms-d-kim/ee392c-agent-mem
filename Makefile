@@ -18,7 +18,7 @@ help:
 	@echo ""
 	@echo "  make verify       Run the synthetic test and assertions"
 	@echo "  make verify-v3    Dry-run final-v3 traces, validate, and analyze"
-	@echo "  make status       Show recent [CC]/[CX]/[H] commits"
+	@echo "  make status       Show recent commits"
 	@echo ""
 
 cycle1-cc:
@@ -41,7 +41,7 @@ cycle1-cc:
 	@echo "4. After Claude Code finishes, review and commit:"
 	@echo "     git diff agent/tracer.py"
 	@echo "     git add agent/tracer.py"
-	@echo "     git commit -m '[CC] implement Tracer class'"
+	@echo "     git commit -m 'Implement Tracer class'"
 	@echo ""
 
 cycle1-cx:
@@ -62,11 +62,11 @@ cycle1-cx:
 	@echo ""
 	@echo "4. After Codex saves the review, commit it:"
 	@echo "     git add reviews/01-tracer-review.md"
-	@echo "     git commit -m '[CX] review of Tracer'"
+	@echo "     git commit -m 'Review Tracer implementation'"
 	@echo ""
 	@echo "5. Read the review. Apply [BLOCKER] and [HIGH] fixes:"
 	@echo "     - Either by hand, or by starting claude again with the review pasted"
-	@echo "     - git commit -m '[H] apply Codex review fixes'"
+	@echo "     - git commit -m 'Apply tracer review fixes'"
 	@echo ""
 	@echo "6. Merge back to main when satisfied:"
 	@echo "     git checkout main && git merge feat/tracer-cc"
@@ -134,9 +134,9 @@ verify-v3:
 
 status:
 	@echo ""
-	@echo "Recent ping-pong commits:"
+	@echo "Recent commits:"
 	@echo ""
-	@git log --oneline 2>/dev/null | grep -E "\[(CC|CX|H)\]" | head -20 || echo "No tagged commits yet."
+	@git log --oneline -20 2>/dev/null || echo "No commits yet."
 	@echo ""
 
 .PHONY: help cycle1-cc cycle1-cx cycle2-cc cycle2-cx verify verify-v3 status

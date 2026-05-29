@@ -26,4 +26,4 @@ and verify:
 
 Wait — the EXPECTED dict in the file says n_unique_logical_ids = 2. That's because it didn't account for the test_output. Update EXPECTED to 3 and adjust the comment.
 
-Commit message starting with [CC]. Stage but do not commit.
+Write a concise commit message. Stage but do not commit. Do not include tool/vendor authorship tags.

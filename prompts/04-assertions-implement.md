@@ -30,6 +30,6 @@ Implementation rules:
 
 Output: a single new file validation/assert_synthetic.py.
 
-Save it. Write a commit message starting with [CX] describing what you wrote and what bugs you specifically tried to catch.
+Save it. Write a commit message describing what you wrote and what bugs you specifically tried to catch. Do not include tool/vendor authorship tags.
 
 Stage but do not commit.

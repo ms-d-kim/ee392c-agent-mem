@@ -105,8 +105,7 @@ Don't add a linter config or formatting rules. Match what's already in the file.
 
 1. Run the synthetic test if you touched the tracer or analysis code.
 2. State what you did, in one paragraph, in the commit message.
-3. Tag the commit message with `[CC]` if you are Claude Code, `[CX]` if Codex,
-   so the human can see at a glance who wrote what during ping-pong cycles.
+3. Do not include tool/vendor authorship tags in commit messages.
 4. Do not push without the human's say-so.
 
 ---

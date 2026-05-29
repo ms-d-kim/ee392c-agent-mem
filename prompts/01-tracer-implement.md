@@ -18,4 +18,4 @@ Do NOT:
 - Modify any file other than agent/tracer.py
 - Add new dependencies
 
-When done, write a one-paragraph commit message starting with [CC] describing what you did, but do not commit yet — leave the staged changes for me to review.
+When done, write a one-paragraph commit message describing what you did, but do not commit yet — leave the staged changes for me to review. Do not include tool/vendor authorship tags.
