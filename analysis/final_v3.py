@@ -15,6 +15,9 @@ from pathlib import Path
 EXPECTED_SCHEMA_VERSION = 3
 
 try:
+    import matplotlib
+
+    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 except ImportError:  # pragma: no cover - optional local dependency
     plt = None
@@ -84,7 +87,9 @@ def liveness_intervals(events: list[dict]) -> list[dict]:
     intervals = []
     live = {}
     task_end = max((event["ts"] for event in events), default=0.0)
+    task_end_step = max((event["step"] for event in events), default=0)
     kv_end_by_step = kv_next_prefill_boundaries(events, task_end)
+    kv_end_step_by_step = kv_next_prefill_steps(events, task_end_step)
     for event in sorted(events, key=lambda e: (e["ts"], e["step"])):
         oid = event["object_id"]
         op = event["op"]
@@ -92,26 +97,30 @@ def liveness_intervals(events: list[dict]) -> list[dict]:
             continue
         if op == "create":
             if oid in live:
-                intervals.append(make_interval(live[oid], event["ts"]))
-            live[oid] = event
+                intervals.append(make_interval(live[oid], event["ts"], event["step"]))
+            live[oid] = make_live_state(event)
         elif op == "mutate":
             if oid in live:
-                intervals.append(make_interval(live[oid], event["ts"]))
-            live[oid] = event
+                intervals.append(make_interval(live[oid], event["ts"], event["step"]))
+            live[oid] = make_live_state(event)
         elif op == "free":
             if oid in live:
-                intervals.append(make_interval(live.pop(oid), event["ts"]))
+                intervals.append(make_interval(live.pop(oid), event["ts"], event["step"]))
         elif op == "read":
             if oid in live:
-                live[oid]["_last_read_ts"] = event["ts"]
-                live[oid]["_read_count"] = live[oid].get("_read_count", 0) + 1
-    for event in live.values():
+                live[oid]["last_read_ts"] = event["ts"]
+                live[oid]["last_read_step"] = event["step"]
+                live[oid]["read_count"] += 1
+    for state in live.values():
+        event = state["event"]
         default_end = task_end
+        default_end_step = task_end_step
         cap_at_default = False
         if event.get("repr_type") == "kv_estimated":
             default_end = kv_end_by_step.get(event["step"], task_end)
+            default_end_step = kv_end_step_by_step.get(event["step"], task_end_step)
             cap_at_default = True
-        intervals.append(make_interval(event, default_end, cap_at_default=cap_at_default))
+        intervals.append(make_interval(state, default_end, default_end_step, cap_at_default=cap_at_default))
     return intervals
 
 
@@ -132,8 +141,37 @@ def kv_next_prefill_boundaries(events: list[dict], task_end: float) -> dict[int,
     return boundaries
 
 
-def make_interval(event: dict, default_end: float, *, cap_at_default: bool = False) -> dict:
-    end_ts = default_end if cap_at_default else max(default_end, event.get("_last_read_ts", default_end))
+def kv_next_prefill_steps(events: list[dict], task_end_step: int) -> dict[int, int]:
+    """Return the next prompt step used for step-normalized KV lifetime."""
+    steps = sorted({
+        event["step"]
+        for event in events
+        if event.get("repr_type") == "kv_estimated"
+        and event.get("op") == "create"
+        and not is_bookkeeping_event(event)
+    })
+    boundaries = {}
+    for idx, step in enumerate(steps):
+        boundaries[step] = steps[idx + 1] if idx + 1 < len(steps) else task_end_step
+    return boundaries
+
+
+def make_live_state(event: dict) -> dict:
+    return {"event": event, "last_read_ts": None, "last_read_step": None, "read_count": 0}
+
+
+def make_interval(
+    state: dict,
+    default_end: float,
+    default_end_step: int,
+    *,
+    cap_at_default: bool = False,
+) -> dict:
+    event = state["event"]
+    last_read_ts = state["last_read_ts"] if state["last_read_ts"] is not None else default_end
+    last_read_step = state["last_read_step"] if state["last_read_step"] is not None else default_end_step
+    end_ts = default_end if cap_at_default else max(default_end, last_read_ts)
+    end_step = default_end_step if cap_at_default else max(default_end_step, last_read_step)
     return {
         "semantic_type": semantic(event),
         "repr_type": event["repr_type"],
@@ -143,7 +181,10 @@ def make_interval(event: dict, default_end: float, *, cap_at_default: bool = Fal
         "create_ts": event["ts"],
         "end_ts": end_ts,
         "lifetime_s": max(0.0, end_ts - event["ts"]),
-        "read_count": event.get("_read_count", 0),
+        "create_step": event["step"],
+        "end_step": end_step,
+        "lifetime_steps": max(0, end_step - event["step"]),
+        "read_count": state["read_count"],
     }
 
 
@@ -170,16 +211,23 @@ def semantic_summary(traces: list[tuple[Path, str, str, list[dict]]]) -> list[di
                 mutates[semantic(event)] += 1
         agg = defaultdict(lambda: {
             "byte_seconds": 0.0,
+            "byte_steps": 0,
             "n_objects": 0,
             "logical_ids": set(),
             "reads": 0,
             "mutates": 0,
+            "max_lifetime_steps": 0,
         })
         for interval in intervals:
             sem = interval["semantic_type"]
             agg[sem]["byte_seconds"] += interval["size_bytes"] * interval["lifetime_s"]
+            agg[sem]["byte_steps"] += interval["size_bytes"] * interval["lifetime_steps"]
             agg[sem]["n_objects"] += 1
             agg[sem]["logical_ids"].add(interval["logical_id"])
+            agg[sem]["max_lifetime_steps"] = max(
+                agg[sem]["max_lifetime_steps"],
+                interval["lifetime_steps"],
+            )
         for sem, count in reads.items():
             agg[sem]["reads"] = count
         for sem, count in mutates.items():
@@ -193,6 +241,8 @@ def semantic_summary(traces: list[tuple[Path, str, str, list[dict]]]) -> list[di
                 "n_objects": data["n_objects"],
                 "n_logical_objects": len(data["logical_ids"]),
                 "byte_seconds": round(data["byte_seconds"], 3),
+                "byte_steps": data["byte_steps"],
+                "max_lifetime_steps": data["max_lifetime_steps"],
                 "logical_read_events": data["reads"],
                 "mutate_events": data["mutates"],
             })
@@ -363,6 +413,27 @@ def cached_cross_checks(traces: list[tuple[Path, str, str, list[dict]]]) -> list
     return rows
 
 
+def prompt_cache_summary(traces: list[tuple[Path, str, str, list[dict]]]) -> list[dict]:
+    rows = []
+    for path, workload, condition, events in traces:
+        checks = [event for event in events if semantic(event) == "engine_cross_check"]
+        prompt_tokens = sum(int(event.get("prompt_token_count", 0)) for event in checks)
+        cached_tokens = sum(int(event.get("cached_tokens", 0)) for event in checks)
+        new_tokens = max(0, prompt_tokens - cached_tokens)
+        rows.append({
+            "trace": path.name,
+            "workload": workload,
+            "condition": condition,
+            "generation_steps": len(checks),
+            "prompt_tokens_total": prompt_tokens,
+            "cached_tokens_total": cached_tokens,
+            "new_prefill_tokens_total": new_tokens,
+            "cached_token_fraction": round(cached_tokens / prompt_tokens, 3) if prompt_tokens else "",
+            "max_prompt_tokens": max((int(event.get("prompt_token_count", 0)) for event in checks), default=0),
+        })
+    return rows
+
+
 def bar_figure(rows: list[dict], *, value_key: str, group_key: str, out_path: Path, title: str) -> None:
     if plt is None:
         return
@@ -378,6 +449,51 @@ def bar_figure(rows: list[dict], *, value_key: str, group_key: str, out_path: Pa
     ax.set_xticks(range(len(labels)), labels=labels, rotation=45, ha="right")
     ax.set_title(title, loc="left")
     ax.set_ylabel(value_key.replace("_", " "))
+    fig.tight_layout()
+    fig.savefig(out_path.with_suffix(".png"), dpi=180)
+    fig.savefig(out_path.with_suffix(".svg"))
+    plt.close(fig)
+
+
+def search_funnel_figure(rows: list[dict], out_path: Path) -> None:
+    if plt is None or not rows:
+        return
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    ordered = sorted(rows, key=lambda row: row["condition"])
+    labels = [row["condition"] for row in ordered]
+    returned = [float(row["returned_bytes"] or 0) for row in ordered]
+    inserted = [float(row["inserted_bytes"] or 0) for row in ordered]
+    x = range(len(labels))
+    width = 0.36
+    fig, ax = plt.subplots(figsize=(6.5, 4.2))
+    ax.bar([i - width / 2 for i in x], returned, width=width, label="returned", color=COLORS["search_result"])
+    ax.bar([i + width / 2 for i in x], inserted, width=width, label="inserted", color=COLORS["retrieved_snippet"])
+    ax.set_xticks(list(x), labels)
+    ax.set_ylabel("bytes")
+    ax.set_title("Search prompt pollution by condition", loc="left")
+    ax.legend(frameon=False)
+    fig.tight_layout()
+    fig.savefig(out_path.with_suffix(".png"), dpi=180)
+    fig.savefig(out_path.with_suffix(".svg"))
+    plt.close(fig)
+
+
+def prompt_cache_figure(rows: list[dict], out_path: Path) -> None:
+    if plt is None or not rows:
+        return
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    ordered = sorted(rows, key=lambda row: (row["workload"], row["condition"]))
+    labels = [f"{row['workload']}\n{row['condition']}" for row in ordered]
+    cached = [float(row["cached_tokens_total"] or 0) for row in ordered]
+    new = [float(row["new_prefill_tokens_total"] or 0) for row in ordered]
+    x = range(len(labels))
+    fig, ax = plt.subplots(figsize=(8.5, 4.8))
+    ax.bar(x, cached, label="cached prefix tokens", color="#4E79A7")
+    ax.bar(x, new, bottom=cached, label="new prefill tokens", color="#E15759")
+    ax.set_xticks(list(x), labels, rotation=35, ha="right")
+    ax.set_ylabel("prompt tokens")
+    ax.set_title("Prompt tokens split into cached reuse and new prefill", loc="left")
+    ax.legend(frameon=False)
     fig.tight_layout()
     fig.savefig(out_path.with_suffix(".png"), dpi=180)
     fig.savefig(out_path.with_suffix(".svg"))
@@ -433,10 +549,12 @@ def main(argv: list[str]) -> int:
     search_rows = search_funnel(traces)
     compaction_rows = compaction_funnel(traces)
     check_rows = cached_cross_checks(traces)
+    prompt_cache_rows = prompt_cache_summary(traces)
 
     write_csv(out_dir / "semantic_summary.csv", semantic_rows, [
         "trace", "workload", "condition", "semantic_type", "n_objects",
-        "n_logical_objects", "byte_seconds", "logical_read_events", "mutate_events",
+        "n_logical_objects", "byte_seconds", "byte_steps", "max_lifetime_steps",
+        "logical_read_events", "mutate_events",
     ])
     write_csv(out_dir / "kv_pressure.csv", kv_rows, [
         "trace", "workload", "condition", "semantic_type",
@@ -464,6 +582,11 @@ def main(argv: list[str]) -> int:
         "prefix_caching", "cached_tokens", "cached_tokens_available",
         "cached_tokens_source", "cached_span_tokens", "cached_token_delta",
         "cross_check_status", "cross_check_pass", "cross_check_note",
+    ])
+    write_csv(out_dir / "prompt_cache_summary.csv", prompt_cache_rows, [
+        "trace", "workload", "condition", "generation_steps",
+        "prompt_tokens_total", "cached_tokens_total", "new_prefill_tokens_total",
+        "cached_token_fraction", "max_prompt_tokens",
     ])
 
     default_semantic = [
@@ -502,20 +625,32 @@ def main(argv: list[str]) -> int:
     )
     bar_figure(
         default_dup,
-        value_key="kv_text_amplification",
+        value_key="text_tokens_duplication_factor",
         group_key="semantic_type",
         out_path=fig_dir / "duplication_factor",
-        title="KV/text amplification by workload",
+        title="Text/token duplication factor by workload",
     )
     scatter_lifetime_reuse(traces, fig_dir / "lifetime_reuse")
     if search_rows:
-        bar_figure(search_rows, value_key="scanned_bytes", group_key="condition",
-                   out_path=fig_dir / "search_scanned_bytes",
-                   title="Search scanned bytes by condition")
-    if compaction_rows:
-        bar_figure(compaction_rows, value_key="raw_context_bytes", group_key="condition",
-                   out_path=fig_dir / "compaction_raw_context",
-                   title="Compaction raw context bytes by condition")
+        search_funnel_figure(search_rows, fig_dir / "search_prompt_pollution")
+    if prompt_cache_rows:
+        prompt_cache_figure(prompt_cache_rows, fig_dir / "prompt_cache_reuse")
+    raw_context_kv = [
+        row for row in kv_rows
+        if row["workload"] == "compaction_agent" and row["semantic_type"] == "raw_context"
+    ]
+    if raw_context_kv:
+        bar_figure(raw_context_kv, value_key="logical_projected_kv_bytes", group_key="condition",
+                   out_path=fig_dir / "compaction_raw_context_kv",
+                   title="Compaction raw-context logical KV by condition")
+    raw_context_semantic = [
+        row for row in semantic_rows
+        if row["workload"] == "compaction_agent" and row["semantic_type"] == "raw_context"
+    ]
+    if raw_context_semantic:
+        bar_figure(raw_context_semantic, value_key="byte_steps", group_key="condition",
+                   out_path=fig_dir / "compaction_raw_context_byte_steps",
+                   title="Compaction raw-context byte-steps by condition")
     print(f"Wrote CSVs to {out_dir}")
     if plt is None:
         print("Skipped figures because matplotlib is not installed")

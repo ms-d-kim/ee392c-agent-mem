@@ -202,6 +202,18 @@ def nvtx_phase(name: str):
         with nvtx_phase("prefill"):
             ...
     """
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.nvtx.range_push(name)
+            try:
+                yield
+            finally:
+                torch.cuda.nvtx.range_pop()
+            return
+    except Exception:
+        pass
     if nvtx is None:
         yield
         return

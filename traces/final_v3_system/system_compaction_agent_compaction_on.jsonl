@@ -1,0 +1,63 @@
+{"ts": 0.0001584310084581375, "source": "system", "metric": "psutil_available", "value": 1.0, "unit": "bool"}
+{"ts": 0.0003588360268622637, "source": "system", "metric": "nvml_available", "value": 1.0, "unit": "bool", "gpu_count": 1}
+{"ts": 0.001046973979100585, "source": "torch", "metric": "cuda_allocated", "value": 0.0, "unit": "bytes", "label": "trace_start", "gpu_index": 0}
+{"ts": 0.0011283820495009422, "source": "psutil", "metric": "rss", "value": 1023131648.0, "unit": "bytes"}
+{"ts": 0.001238004071637988, "source": "psutil", "metric": "vms", "value": 12123848704.0, "unit": "bytes"}
+{"ts": 0.0011468520388007164, "source": "torch", "metric": "cuda_reserved", "value": 0.0, "unit": "bytes", "label": "trace_start", "gpu_index": 0}
+{"ts": 0.0014175340766087174, "source": "nvml", "metric": "gpu_mem_used", "value": 74344038400.0, "unit": "bytes", "gpu_index": 0}
+{"ts": 0.0014715139986947179, "source": "nvml", "metric": "gpu_mem_total", "value": 85520809984.0, "unit": "bytes", "gpu_index": 0}
+{"ts": 0.003635847009718418, "source": "system", "metric": "monotonic_anchor_delta", "value": 0.003630644059740007, "unit": "seconds", "label": "tracer_t0"}
+{"ts": 1.0017001080559567, "source": "psutil", "metric": "rss", "value": 1023131648.0, "unit": "bytes"}
+{"ts": 1.0020617570262402, "source": "psutil", "metric": "vms", "value": 12123848704.0, "unit": "bytes"}
+{"ts": 1.002373766968958, "source": "nvml", "metric": "gpu_mem_used", "value": 74346135552.0, "unit": "bytes", "gpu_index": 0}
+{"ts": 1.002733285073191, "source": "nvml", "metric": "gpu_mem_total", "value": 85520809984.0, "unit": "bytes", "gpu_index": 0}
+{"ts": 2.003447753028013, "source": "psutil", "metric": "rss", "value": 1023131648.0, "unit": "bytes"}
+{"ts": 2.003596668015234, "source": "psutil", "metric": "vms", "value": 12123848704.0, "unit": "bytes"}
+{"ts": 2.004639770020731, "source": "nvml", "metric": "gpu_mem_used", "value": 74346135552.0, "unit": "bytes", "gpu_index": 0}
+{"ts": 2.0047025060048327, "source": "nvml", "metric": "gpu_mem_total", "value": 85520809984.0, "unit": "bytes", "gpu_index": 0}
+{"ts": 3.004959785961546, "source": "psutil", "metric": "rss", "value": 1023131648.0, "unit": "bytes"}
+{"ts": 3.0052478989819065, "source": "psutil", "metric": "vms", "value": 12123848704.0, "unit": "bytes"}
+{"ts": 3.005421765963547, "source": "nvml", "metric": "gpu_mem_used", "value": 74346135552.0, "unit": "bytes", "gpu_index": 0}
+{"ts": 3.0054881550604478, "source": "nvml", "metric": "gpu_mem_total", "value": 85520809984.0, "unit": "bytes", "gpu_index": 0}
+{"ts": 4.005736323073506, "source": "psutil", "metric": "rss", "value": 1023131648.0, "unit": "bytes"}
+{"ts": 4.005840196972713, "source": "psutil", "metric": "vms", "value": 12123848704.0, "unit": "bytes"}
+{"ts": 4.005981802009046, "source": "nvml", "metric": "gpu_mem_used", "value": 74346135552.0, "unit": "bytes", "gpu_index": 0}
+{"ts": 4.006184563040733, "source": "nvml", "metric": "gpu_mem_total", "value": 85520809984.0, "unit": "bytes", "gpu_index": 0}
+{"ts": 5.006610466982238, "source": "psutil", "metric": "rss", "value": 1023131648.0, "unit": "bytes"}
+{"ts": 5.007068471051753, "source": "psutil", "metric": "vms", "value": 12123848704.0, "unit": "bytes"}
+{"ts": 5.007408641977236, "source": "nvml", "metric": "gpu_mem_used", "value": 74346135552.0, "unit": "bytes", "gpu_index": 0}
+{"ts": 5.007483585970476, "source": "nvml", "metric": "gpu_mem_total", "value": 85520809984.0, "unit": "bytes", "gpu_index": 0}
+{"ts": 6.0078931379830465, "source": "psutil", "metric": "rss", "value": 1023131648.0, "unit": "bytes"}
+{"ts": 6.008259140071459, "source": "psutil", "metric": "vms", "value": 12123848704.0, "unit": "bytes"}
+{"ts": 6.008398378035054, "source": "nvml", "metric": "gpu_mem_used", "value": 74346135552.0, "unit": "bytes", "gpu_index": 0}
+{"ts": 6.00844673498068, "source": "nvml", "metric": "gpu_mem_total", "value": 85520809984.0, "unit": "bytes", "gpu_index": 0}
+{"ts": 7.008809439023025, "source": "psutil", "metric": "rss", "value": 1023131648.0, "unit": "bytes"}
+{"ts": 7.00910299597308, "source": "psutil", "metric": "vms", "value": 12123848704.0, "unit": "bytes"}
+{"ts": 7.009450512006879, "source": "nvml", "metric": "gpu_mem_used", "value": 74346135552.0, "unit": "bytes", "gpu_index": 0}
+{"ts": 7.00949623901397, "source": "nvml", "metric": "gpu_mem_total", "value": 85520809984.0, "unit": "bytes", "gpu_index": 0}
+{"ts": 8.009726901073009, "source": "psutil", "metric": "rss", "value": 1023131648.0, "unit": "bytes"}
+{"ts": 8.0098247830756, "source": "psutil", "metric": "vms", "value": 12123848704.0, "unit": "bytes"}
+{"ts": 8.009965855046175, "source": "nvml", "metric": "gpu_mem_used", "value": 74346135552.0, "unit": "bytes", "gpu_index": 0}
+{"ts": 8.01001485902816, "source": "nvml", "metric": "gpu_mem_total", "value": 85520809984.0, "unit": "bytes", "gpu_index": 0}
+{"ts": 9.010232739034109, "source": "psutil", "metric": "rss", "value": 1023131648.0, "unit": "bytes"}
+{"ts": 9.010399523074739, "source": "psutil", "metric": "vms", "value": 12123848704.0, "unit": "bytes"}
+{"ts": 9.010687411995605, "source": "nvml", "metric": "gpu_mem_used", "value": 74346135552.0, "unit": "bytes", "gpu_index": 0}
+{"ts": 9.010754824033938, "source": "nvml", "metric": "gpu_mem_total", "value": 85520809984.0, "unit": "bytes", "gpu_index": 0}
+{"ts": 10.010995920049027, "source": "psutil", "metric": "rss", "value": 1023131648.0, "unit": "bytes"}
+{"ts": 10.011657407041639, "source": "psutil", "metric": "vms", "value": 12123848704.0, "unit": "bytes"}
+{"ts": 10.011820213054307, "source": "nvml", "metric": "gpu_mem_used", "value": 74346135552.0, "unit": "bytes", "gpu_index": 0}
+{"ts": 10.011899515986443, "source": "nvml", "metric": "gpu_mem_total", "value": 85520809984.0, "unit": "bytes", "gpu_index": 0}
+{"ts": 11.012136548059061, "source": "psutil", "metric": "rss", "value": 1023131648.0, "unit": "bytes"}
+{"ts": 11.012446550070308, "source": "psutil", "metric": "vms", "value": 12123848704.0, "unit": "bytes"}
+{"ts": 11.013139800983481, "source": "nvml", "metric": "gpu_mem_used", "value": 74346135552.0, "unit": "bytes", "gpu_index": 0}
+{"ts": 11.013194269966334, "source": "nvml", "metric": "gpu_mem_total", "value": 85520809984.0, "unit": "bytes", "gpu_index": 0}
+{"ts": 12.01342153805308, "source": "psutil", "metric": "rss", "value": 1023131648.0, "unit": "bytes"}
+{"ts": 12.013712720014155, "source": "psutil", "metric": "vms", "value": 12123848704.0, "unit": "bytes"}
+{"ts": 12.013851715018973, "source": "nvml", "metric": "gpu_mem_used", "value": 74346135552.0, "unit": "bytes", "gpu_index": 0}
+{"ts": 12.014025466982275, "source": "nvml", "metric": "gpu_mem_total", "value": 85520809984.0, "unit": "bytes", "gpu_index": 0}
+{"ts": 13.014240558026358, "source": "psutil", "metric": "rss", "value": 1023131648.0, "unit": "bytes"}
+{"ts": 13.014517636969686, "source": "psutil", "metric": "vms", "value": 12123848704.0, "unit": "bytes"}
+{"ts": 13.014631838072091, "source": "nvml", "metric": "gpu_mem_used", "value": 74346135552.0, "unit": "bytes", "gpu_index": 0}
+{"ts": 13.014857375063002, "source": "nvml", "metric": "gpu_mem_total", "value": 85520809984.0, "unit": "bytes", "gpu_index": 0}
+{"ts": 13.459913923055865, "source": "torch", "metric": "cuda_allocated", "value": 0.0, "unit": "bytes", "label": "trace_end", "gpu_index": 0}
+{"ts": 13.459964300040156, "source": "torch", "metric": "cuda_reserved", "value": 0.0, "unit": "bytes", "label": "trace_end", "gpu_index": 0}

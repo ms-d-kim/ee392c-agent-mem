@@ -1,0 +1,7 @@
+trace,workload,condition,generation_steps,prompt_tokens_total,cached_tokens_total,new_prefill_tokens_total,cached_token_fraction,max_prompt_tokens
+coding_agent_cache_off.jsonl,coding_agent,cache_off,5,1571,0,1571,0.0,533
+coding_agent_cache_on.jsonl,coding_agent,cache_on,5,1590,1344,246,0.845,548
+compaction_agent_compaction_off.jsonl,compaction_agent,compaction_off,5,22234,17408,4826,0.783,6335
+compaction_agent_compaction_on.jsonl,compaction_agent,compaction_on,5,12364,6624,5740,0.536,3878
+search_agent_broad.jsonl,search_agent,broad,4,4048,3232,816,0.798,1784
+search_agent_targeted.jsonl,search_agent,targeted,4,2957,2576,381,0.871,1347

@@ -3,6 +3,10 @@ traces/*.jsonl
 traces/*.parquet
 traces/*.nsys-rep
 traces/*.sqlite
+analysis_out/**/*.nsys-rep
+analysis_out/**/*.sqlite
+figures/final_v3/search_scanned_bytes.*
+figures/final_v3/compaction_raw_context.*
 
 # Python
 __pycache__/

@@ -11,7 +11,7 @@ deviate without updating this file. Discoveries → append to `TROUBLESHOOTING.m
 
 - Template: `runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04`
   (verify the latest equivalent in RunPod's template catalog)
-- GPU: RTX 4090 24GB on-demand
+- GPU: NVIDIA H100 80GB HBM3 on-demand
 - Persistent volume: 50GB attached at `/workspace`
 - SSH key registered with RunPod, SSH enabled
 
@@ -103,14 +103,22 @@ These are what the engine-layer telemetry scrapes.
 ## 8. (Stretch, ~30 min) Install Nsight Systems
 
 ```bash
-# Method 1: apt (preferred)
+# Method 1: apt (preferred, package name varies by image)
 apt-get update
-apt-get install -y nsight-systems-cli
+apt-get install -y nsight-systems-cli || true
+apt-get install -y ninja-build
 nsys --version
 
-# Method 2: if apt fails, download the .deb directly from
+# Method 2: if apt package lookup fails, check bundled NVIDIA tooling first
+find /opt/nvidia /usr/local /usr -path '*nsys' -type f 2>/dev/null | head
+
+# Method 3: if neither path works, download the .deb directly from
 # https://developer.nvidia.com/nsight-systems and dpkg -i
 ```
+
+On the H100 RunPod used for the final-v3 sweep, `nsight-systems-cli` was not
+available by that apt name, but this bundled binary worked:
+`/opt/nvidia/nsight-compute/2024.1.1/host/target-linux-x64/nsys`.
 
 **Drop trigger:** if install fails or requires permissions you don't have on
 the RunPod container, drop nsys (per pre-committed cut #5 in DECISIONS.md).
@@ -118,7 +126,7 @@ The methodology does not depend on it.
 
 **Smoke test:**
 ```bash
-nsys profile -o /tmp/smoke -- python -c "import time; time.sleep(2); print('ok')"
+nsys profile -o /tmp/smoke --force-overwrite=true python -c "import time; time.sleep(2); print('ok')"
 nsys stats /tmp/smoke.nsys-rep | head -20
 ```
 **Expected:** stats output with no errors. If it works here, it'll work on the
@@ -157,5 +165,37 @@ Once the bring-up runbook above succeeds end-to-end, use the final-v3 path:
 4. Run all six final-v3 traces under `traces/final_v3/`.
 5. Run `analysis.final_v3` to produce final CSVs and figures.
 
+**Current H100 status (2026-05-29):** steps 1-5 have passed for the six
+final-v3 traces on RunPod H100. Keep these traces as the official final-v3
+dataset unless `DECISIONS.md` is explicitly revised again.
+
 The synthetic gate remains mandatory. If it fails, every plot from real traces
 is suspect.
+
+## Optional Nsight Systems profile
+
+Nsight is one auxiliary profile of an existing final-v3 trace, not a seventh
+core workload. Prefer the compaction replay because its prompt length changes
+materially across conditions.
+
+```bash
+mkdir -p analysis_out/final_v3 traces/final_v3_nsight
+nsys profile \
+  --trace=cuda,nvtx,osrt \
+  --trace-fork-before-exec=true \
+  --sample=none \
+  --wait=all \
+  --stop-on-exit=true \
+  --output analysis_out/final_v3/nsight_compaction_on \
+  --force-overwrite=true \
+  python3 -m agent.run_final_v3 \
+    --workload compaction_agent \
+    --condition compaction_on \
+    --out traces/final_v3_nsight/compaction_agent_compaction_on.jsonl
+```
+
+Expected primary output:
+
+```text
+analysis_out/final_v3/nsight_compaction_on.nsys-rep
+```

@@ -1,0 +1,19 @@
+{"ts": 0.0001653359504416585, "source": "system", "metric": "psutil_available", "value": 1.0, "unit": "bool"}
+{"ts": 0.000383883947506547, "source": "system", "metric": "nvml_available", "value": 1.0, "unit": "bool", "gpu_count": 1}
+{"ts": 0.001152904937043786, "source": "torch", "metric": "cuda_allocated", "value": 0.0, "unit": "bytes", "label": "trace_start", "gpu_index": 0}
+{"ts": 0.0012484740000218153, "source": "psutil", "metric": "rss", "value": 1007194112.0, "unit": "bytes"}
+{"ts": 0.0013635780196636915, "source": "psutil", "metric": "vms", "value": 12110479360.0, "unit": "bytes"}
+{"ts": 0.0012677470222115517, "source": "torch", "metric": "cuda_reserved", "value": 0.0, "unit": "bytes", "label": "trace_start", "gpu_index": 0}
+{"ts": 0.0015091280220076442, "source": "nvml", "metric": "gpu_mem_used", "value": 74344038400.0, "unit": "bytes", "gpu_index": 0}
+{"ts": 0.0016256249509751797, "source": "nvml", "metric": "gpu_mem_total", "value": 85520809984.0, "unit": "bytes", "gpu_index": 0}
+{"ts": 0.0036126549821347, "source": "system", "metric": "monotonic_anchor_delta", "value": 0.003607369028031826, "unit": "seconds", "label": "tracer_t0"}
+{"ts": 1.0019632159965113, "source": "psutil", "metric": "rss", "value": 1007194112.0, "unit": "bytes"}
+{"ts": 1.0022497540339828, "source": "psutil", "metric": "vms", "value": 12110479360.0, "unit": "bytes"}
+{"ts": 1.0026893409667537, "source": "nvml", "metric": "gpu_mem_used", "value": 74344038400.0, "unit": "bytes", "gpu_index": 0}
+{"ts": 1.0027609239332378, "source": "nvml", "metric": "gpu_mem_total", "value": 85520809984.0, "unit": "bytes", "gpu_index": 0}
+{"ts": 2.0030858169775456, "source": "psutil", "metric": "rss", "value": 1007194112.0, "unit": "bytes"}
+{"ts": 2.0032294190023094, "source": "psutil", "metric": "vms", "value": 12110479360.0, "unit": "bytes"}
+{"ts": 2.0036234059371054, "source": "nvml", "metric": "gpu_mem_used", "value": 74344038400.0, "unit": "bytes", "gpu_index": 0}
+{"ts": 2.003844299004413, "source": "nvml", "metric": "gpu_mem_total", "value": 85520809984.0, "unit": "bytes", "gpu_index": 0}
+{"ts": 2.987298268941231, "source": "torch", "metric": "cuda_allocated", "value": 0.0, "unit": "bytes", "label": "trace_end", "gpu_index": 0}
+{"ts": 2.9874112870311365, "source": "torch", "metric": "cuda_reserved", "value": 0.0, "unit": "bytes", "label": "trace_end", "gpu_index": 0}

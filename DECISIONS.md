@@ -19,10 +19,15 @@ For Qwen2.5-Coder-7B-Instruct with grouped-query attention:
 **Why:** vLLM V1 KVCacheManager hook surface is not stable enough for a 5-day
 timeline. Block-level events would be nice-to-have but the analytical estimate
 captures the same first-order behavior (KV bytes scale linearly with context
-length) and we cross-check against vLLM `/metrics` `gpu_cache_usage_perc`.
+length). Final-v3 reconciles tracer-derived leading-prefix token counts against
+vLLM request-output cached-token counters such as
+`request_output.num_cached_tokens`; this verifies cached-token availability and
+count consistency, not physical KV residency or independent semantic-span
+ground truth.
 
-**Revisit:** in Week 4 if analytical estimate diverges from /metrics-reported
-KV usage by more than ~20%.
+**Revisit:** if cached-token extraction becomes unavailable, cached-token
+reconciliation diverges by more than one KV block, or a later implementation
+adds stable engine-level KV occupancy metrics.
 
 ---
 
@@ -51,13 +56,22 @@ no-eviction occupancy.
 
 ---
 
-## 3. Compute: RUNPOD RTX 4090 24GB
+## 3. Compute: RUNPOD NVIDIA H100 80GB HBM3
 
 **Pod template:** `runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04`
 (or closest current equivalent — verify on RunPod template catalog)
-**GPU:** RTX 4090 24GB on-demand
+**GPU:** NVIDIA H100 80GB HBM3 on-demand
 **Persistent volume:** 50GB attached at `/workspace`
-**Cost:** ~$0.40–0.70/hr on-demand
+
+**Decision update (2026-05-29):** The official final-v3 dataset and auxiliary
+Nsight Systems profile are collected on RunPod H100, not RTX 4090. Do not mix
+H100 final-v3 timing/system-telemetry observations with older RTX 4090 planning
+language.
+
+**Why H100:** Available RunPod capacity and 80GB HBM headroom reduce bring-up
+risk for the final sweep. The project claims remain about semantic lifetime,
+reuse, token spans, analytical KV pressure, and prescriptive tier mapping; they
+do not depend on H100-specific kernel performance.
 
 **Why not local AMD RX 9060 XT:** ROCm support exists (ROCm 7.0.2+, Oct 2025
 for RDNA 4) but adds framework-debugging risk on top of methodology risk.
@@ -67,8 +81,15 @@ Local PC is reserved for dev work against hosted APIs and trace analysis only.
 
 ## 4. Nsight Systems: IN SCOPE (droppable cut #5 only)
 
-**Decision:** Install nsys on the RunPod pod, profile one representative task,
-generate one timeline figure for the pitch and report.
+**Decision:** Install nsys on the RunPod pod, profile one representative
+final-v3 trace/condition, generate one auxiliary timeline figure for the pitch
+and report. This is not a seventh final-v3 workload and is not part of the
+six-trace quantitative comparison.
+
+**Representative profile:** use an existing compaction replay, preferably
+`compaction_agent` / `compaction_on`. Compaction has the strongest systems
+story because prompt length changes materially; the Nsight figure can show
+whether that corresponds to shorter GPU-active prefill/generate regions.
 
 **Why in scope:** ~half-day cost for one strong figure validating that NVTX
 phase boundaries correspond to real kernel activity. Falls naturally into the
@@ -102,6 +123,9 @@ on one task beats a half-instrumented pitch on five.
 ## 6. Workload scope: final-v3 scripted workflow replays
 
 **Final-v3 traces:** 3 workload families × 2 contrast traces = 6 traces.
+Keep this as the official quantitative dataset. Auxiliary system profiles such
+as the one Nsight Systems timeline may profile one of these existing traces,
+but must not be counted as an additional final-v3 workload.
 
 **Workload families:**
 - `coding_agent`: read/edit/test workflow replay, cache on vs off

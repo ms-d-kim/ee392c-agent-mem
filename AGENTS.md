@@ -33,8 +33,13 @@ reinterpret. `DECISIONS.md` is authoritative; `README.md` is summary.
 
 - Tracer v3, synthetic validation, final-v3 runner, final-v3 analysis, and
   optional system telemetry are implemented locally.
-- Historical v2 traces live under `traces/batch_v2/`; final-v3 traces should
-  be freshly generated under `traces/final_v3/`.
+- Historical v2 traces live under `traces/batch_v2/`; the official final-v3
+  H100 traces live under `traces/final_v3/`.
+- The final-v3 H100 six-trace sweep has passed
+  `validation.validate_final_v3`; auxiliary Nsight output is a representative
+  compaction profile, not a seventh core workload.
+- The cached-token gate is an availability/count-reconciliation check against
+  vLLM request-output counters, not independent semantic-attribution proof.
 - The final-v3 workloads are scripted agent-workflow replays, not autonomous
   tool-selection loops.
 
@@ -76,7 +81,8 @@ bumping `SCHEMA_VERSION` and updating `analysis/load_traces.py`.
 - Final-v3 scope: 3 scripted workflow families × 2 contrast traces = 6 traces
 - Historical v2 scope: 3 tools only (`read_file`, `write_file`, `run_tests`)
 - 15-step hard cap per task
-- vLLM V1 + Qwen2.5-Coder-7B-Instruct; prefix caching on for default traces
+- RunPod NVIDIA H100 80GB HBM3
+- vLLM 0.10.2 + Qwen2.5-Coder-7B-Instruct; prefix caching on for default traces
   with explicit cache-off ablation for the coding replay
 - Nsight Systems (nsys) timeline — single figure, droppable cut
 

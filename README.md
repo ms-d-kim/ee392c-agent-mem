@@ -4,10 +4,10 @@
 **Course:** EE 392C — Differentiated Memory Systems, Stanford Spring 2026 (Professor Tambe)
 
 <p align="center">
-  <img src="figures/fig3_capacity_vs_bandwidth.png" alt="Capacity-time vs logical read events" width="92%">
+  <img src="figures/final_v3/prompt_cache_reuse.png" alt="Final-v3 prompt tokens split into cached reuse and new prefill" width="92%">
   <br>
-  <em>KV cache and logical content live on opposite ends of the capacity-time vs logical-access axis.<br>
-  This is the dichotomy that motivates a tiered mapping.</em>
+  <em>Final-v3 H100 traces expose where workflow structure pays new prefill work<br>
+  versus reusing cached-prefix KV.</em>
 </p>
 
 ## What this project is
@@ -32,8 +32,8 @@ structure" is honest; "autonomous production agents broadly" is overclaiming.
 - **Historical v2 batch:** Minimal ReAct-style harness (`agent/run_vllm.py`)
   with three tools (`read_file`, `write_file`, `run_tests`) and a fenced-JSON
   tool-call protocol
-- **Engine:** vLLM 0.6.6.post1 + Qwen2.5-Coder-7B-Instruct
-- **Compute:** RunPod RTX 4090 24GB (Ada sm_89)
+- **Engine:** vLLM 0.10.2 + Qwen2.5-Coder-7B-Instruct
+- **Compute:** RunPod NVIDIA H100 80GB HBM3
 - **Historical v2 tasks:** 2 hand-crafted fixtures (`hello_bug`, `recursion_bug`) ×
   5 sampling temperatures × 2 cache modes (prefix caching on/off) = 20 traces
 
@@ -66,9 +66,44 @@ not measured physical placement.
    activation lifetime within a single forward pass; we measure logical-object
    lifetime across workflow steps)
 
-## Headline findings
+## Final-v3 H100 findings
 
-### Historical v2 findings
+The final report should lead with the schema-v3 H100 traces in
+`traces/final_v3/`. These six traces are paired workflow contrasts, not
+replicates, so the right framing is mechanism-based characterization rather
+than statistical generalization.
+
+### 1. Prefix caching turns repeated coding context into cached-prefix reuse
+
+![Prompt-cache reuse](figures/final_v3/prompt_cache_reuse.png)
+
+In the coding replay, cache-on and cache-off have nearly the same total prompt
+tokens (1,590 vs 1,571). With prefix caching enabled, vLLM reports 1,344 cached
+tokens and only 246 new prefill tokens. Cache-adjusted new KV falls from
+90,087,424 B to 14,106,624 B, an 84.3% reduction.
+
+### 2. Targeted retrieval reduces prompt pollution after the same scan
+
+![Search prompt pollution](figures/final_v3/search_prompt_pollution.png)
+
+The targeted and broad search traces scan the same expanded corpus size
+(88,372 B). The memory difference comes from what enters prompt history: broad
+search returns 2,318 B and inserts 672 B of selected snippets, while targeted
+search returns 691 B and inserts 350 B. Broad `search_result` logical KV is
+3.22x targeted search.
+
+### 3. Compaction cuts retained raw-context pressure, with a reuse tradeoff
+
+![Compaction raw-context KV](figures/final_v3/compaction_raw_context_kv.png)
+
+Both compaction traces ingest the same 18,602 B of raw log context. Compaction
+adds a 513 B summary, demotes earlier raw context, and cuts raw-context logical
+KV from 1.032 GB to 443 MB. The tradeoff is visible in cached-prefix reuse:
+compaction-on has fewer total prompt tokens than compaction-off (12,364 vs
+22,234), but more new prefill tokens (5,740 vs 4,826) because inserting a
+summary disrupts the long leading prefix.
+
+## Historical v2 background
 
 The original v2 batch remains useful background, but the final report should use
 fresh v3 traces for cross-workload claims. v2 duplication factors are historical
@@ -88,10 +123,10 @@ They will never be well-served by a single memory tier.
 ![Memory pressure timeline](figures/fig2_memory_pressure_timeline.png)
 
 Across one task (`hello_bug`, cache_on, t=0.0), live KV grows step-wise to
-42 MB while live logical content stays under 2 KB. Aggregated across all 20
-traces (chart at top of README), KV holds **99.994% of byte-seconds but only
-3.3% of logical read events**; logical content inverts that ratio. This is not
-a hardware bandwidth measurement.
+42 MB while live logical content stays under 2 KB. The historical v2 aggregate
+CSV reports that KV holds **99.994% of byte-seconds but only 3.3% of logical
+read events**; logical content inverts that ratio. This is not a hardware
+bandwidth measurement.
 
 ### 3. Proposed three-tier mapping
 
@@ -149,23 +184,30 @@ serving/       vLLM launch helpers
 validation/    Synthetic-agent test (tracer correctness contract)
 analysis/      Trace parsing + per-category breakdown
 analysis_out/  Generated summary CSVs
-traces/        Committed: traces/batch_v2/ (20 JSONL traces)
+traces/        Historical v2 traces plus final-v3 H100 trace artifacts
 figures/       Paper-ready figures + standalone SVGs
 tasks/         Task fixtures (hello_bug, recursion_bug)
 ```
 
-## Status (May 28, 2026)
+## Status (May 29, 2026)
 
 - Tracer v3 additive schema + final-v3 replay runner: in local implementation
-- 20-trace batch + summary CSV + per-category CSV: in repo
+- Final-v3 H100 sweep: six real vLLM traces collected under `traces/final_v3/`
+  and passing `validation.validate_final_v3`
+- Final-v3 system telemetry: collected under `traces/final_v3_system/`
+- Final-v3 analysis CSVs/figures: generated under `analysis_out/final_v3/`
+  and `figures/final_v3/`
+- Auxiliary Nsight Systems profile: one H100 compaction trace under
+  `traces/final_v3_nsight/` with report
+  `analysis_out/final_v3/nsight_compaction_on.nsys-rep`
+- Historical 20-trace v2 batch + summary CSV + per-category CSV: in repo
 - Historical paper-ready v2 figures (`figures/fig1`–`fig7`): in repo
-- Final-v3 traces should be regenerated under `traces/final_v3/`
 - Optional system telemetry is auxiliary; final claims should not depend on it
 - Final presentation + report: W5–W6
 
 ## Final v3 artifact path
 
-The final report artifact should use fresh schema-v3 traces in
+The final report artifact should use the schema-v3 H100 traces in
 `traces/final_v3/`, not the historical `traces/batch_v2/` batch. The v3 path
 profiles three structurally distinct scripted agent-workflow replays with two
 contrast traces each:
@@ -202,7 +244,9 @@ carry `semantic_type`, `source`, token-span offsets, token count, and confidence
 KV pressure is a GQA-aware analytical projection derived from model config. KV
 span byte-seconds are bounded at the next prefill boundary. Cache-adjusted KV
 uses vLLM cached-token counters when available and assumes cached prefixes are
-contiguous leading spans. Actual physical HBM residency is not claimed.
+contiguous leading spans. This is a cached-token availability and
+count-reconciliation check, not independent semantic-attribution ground truth.
+Actual physical HBM residency is not claimed.
 
 ## Key dates
 

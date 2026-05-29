@@ -1,12 +1,29 @@
 # Project Summary — for Codex cross-check
 
+> **Current master-plan update (May 29, 2026):** final-v3 is now the active
+> project plan. The official quantitative dataset is the six paired workflow
+> traces in `traces/final_v3/`, collected on RunPod NVIDIA H100 80GB HBM3 with
+> Qwen2.5-Coder-7B-Instruct + vLLM 0.10.2. All six traces pass
+> `validation.validate_final_v3`, and cached-token availability/count
+> reconciliation passed on every engine cross-check event. Auxiliary system
+> telemetry exists under `traces/final_v3_system/`. The optional Nsight Systems
+> artifact is one representative H100 compaction trace/profile, not a seventh
+> core workload:
+> `traces/final_v3_nsight/compaction_agent_compaction_on.jsonl` and
+> `analysis_out/final_v3/nsight_compaction_on.nsys-rep`.
+>
+> **Hardware update:** replace prior RTX 4090 planning language with H100 for
+> final-v3 results. Historical v2 traces/figures remain background only.
+
 > **Superseded by final-v3 implementation work on May 28, 2026.** The current
 > build target is 3 scripted agent-workflow replay families × 2 contrast traces
 > = 6 traces, not 10 workloads × 3 runs. Block-table/HBM residency, cross-tier
 > migration, bootstrap CIs, and autonomous agent-loop claims are not part of the
 > final artifact unless a later note explicitly reintroduces them.
 
-**Status:** Updated through conversation of May 24, 2026. Two scope pivots have happened in this conversation that Codex may not have context on — flagged with **[NEW]** where they're new today. Anything labeled **[VERIFY]** is something Claude is uncertain about and wants Codex to push back on.
+**Status:** The sections below are an archived May 24 planning snapshot kept for
+audit history. Use the May 29 master-plan update above plus `DECISIONS.md` for
+current scope, hardware, validation, and report-facing claims.
 
 ---
 
@@ -106,7 +123,10 @@ The chain: `tracer event (logical class)` → `token_offset_start/end` → `bloc
 1. **Engine cross-check:** Sum tracer-derived prefix-reusable tokens per request == vLLM's `usage.cached_tokens`. **[NEW]** Promoted from optional to required gate.
 2. **Block accounting:** Block table's live block count × block_size × per-token KV bytes ≈ tracer's analytical KV sum per request.
 
-If both pass, the labeling is calibrated against engine ground truth.
+Final-v3 update: the implemented gate reconciles tracer-derived leading-prefix
+token counts against vLLM cached-token counters. It verifies counter
+availability and count consistency; it is not independent engine ground truth
+for semantic-span attribution or physical KV residency.
 
 ---
 
@@ -119,24 +139,34 @@ If both pass, the labeling is calibrated against engine ground truth.
 
 The methods-boundary statement for the report/slide:
 
-> Measured: KV cache residency at block granularity in HBM, logical-class attribution via app-layer instrumentation cross-validated against engine prefix-cache counters, coarse DRAM via RSS. Not measured: SRAM, activation lifetimes, HBM bandwidth, cross-tier residence absent offload. Tier mapping is prescriptive, derived from measured lifetime/reuse, not measured cross-tier residence.
+> Measured in final-v3: logical semantic-object lifetime/reuse, prompt token
+> spans, analytical KV pressure, and vLLM cached-token count reconciliation.
+> Not measured: physical HBM residency by semantic class, SRAM, activation
+> lifetimes, HBM bandwidth, or cross-tier residence/offload. Tier mapping is
+> prescriptive, derived from semantic lifetime/reuse and analytical KV pressure.
 
 ---
 
-## 7. Implementation state (as of May 24)
+## 7. Implementation state
 
-From memory, last confirmed status:
+**Current as of May 29, 2026:**
 
-- ✅ Cycle 1 (Tracer implementation) — merged to main
-- ✅ Cycle 2 (synthetic validation with oracle assertions) — merged to main
-- ✅ Append-mode bug fix — landed
-- ❌ Cycle 3 (system telemetry, `serving/telemetry.py`) — not committed
-- ❌ Agent loop (`agent/tools.py`, `agent/graph.py`) — not committed
-- ❓ vLLM bring-up on RunPod — status unknown
-- ❌ Token-offset tracking — not yet added (new requirement)
-- ❌ Block table snapshot logic — not yet added (new requirement)
-
-**[VERIFY]** Codex should confirm current main against this list. The pivot today doesn't change Cycle 3 or agent-loop requirements — those still need to land before the workload sweep.
+- Tracer v3 with semantic/span metadata is implemented.
+- Synthetic tracer correctness gate passes.
+- Final-v3 runner emits six deterministic workflow replay traces:
+  `coding_agent` cache on/off, `search_agent` targeted/broad, and
+  `compaction_agent` compaction on/off.
+- The official six-trace final-v3 sweep has been collected on RunPod H100 under
+  `traces/final_v3/`.
+- `validation.validate_final_v3 traces/final_v3/*.jsonl` passes for all six
+  traces.
+- Cached-token extraction is no longer `unavailable`: all observed final-v3
+  engine cross-check events pass the count-reconciliation gate.
+- System telemetry for all six traces exists under `traces/final_v3_system/`.
+- Final-v3 analysis outputs exist under `analysis_out/final_v3/` and
+  `figures/final_v3/`.
+- One auxiliary Nsight Systems compaction profile exists for timeline evidence;
+  it is not part of the six-trace quantitative comparison.
 
 ---
 
@@ -144,9 +174,9 @@ From memory, last confirmed status:
 
 | Window | Deliverable |
 |---|---|
-| May 25–26 | Lock 10 workloads with Kristen. Source public datasets. Token-offset + block-table snapshot land. Engine cross-check gate passes on workload #1. |
-| May 27–29 | 3 traces per workload = 30 runs. Cross-workload plots. |
-| May 30–31 | Analysis, tier mapping argument, presentation deck. |
+| May 25–28 | Lock final-v3 scope and implement tracer/runner/validation/analysis path. |
+| May 29 | H100 six-trace final-v3 sweep, validation, analysis, and auxiliary Nsight profile. |
+| May 30–31 | Tighten final-v3 figures, tier-mapping argument, and presentation deck. |
 | Jun 1–3 | Final presentation. |
 | Jun 4–8 | Report (5–6 pages, 10pt, 2-col). Artifact submission (repo + trace dataset). |
 
@@ -160,10 +190,15 @@ Hard deadline reminders: presentation Jun 1–3 (~15 min talk); report due Jun 8
 2. **Per-workload sample size note is superseded.** The current final-v3 scope
    has one default trace and one ablation per workload family, so use mechanism-
    based characterization only; no bootstrap CIs or significance language.
-3. **Setup cost on 10 prompt scaffolds.** New dominant cost. If dataset sourcing slips, cut to 6–7 workloads rather than reduce runs per workload.
-4. **vLLM block table API.** V1 internals have churned — block table access path must be verified before promising the snapshot approach. **[VERIFY]**
-5. **Tambe Q3 (SRAM/DRAM/HBM physical access) only partially addressed.** SRAM is gone; HBM is measured at block level; DRAM is coarse. Cross-tier residence only via Path B if attempted.
-6. **RunPod bring-up status unconfirmed.** Cycle 3 system telemetry not committed yet. Both must clear before the May 27 sweep starts.
+3. **Hardware language drift.** Final-v3 results are H100, not RTX 4090. Slides
+   and report text must not retain stale RTX 4090 wording for the final dataset.
+4. **Physical-residency overclaim risk.** Final-v3 uses semantic/token-span
+   attribution and analytical KV pressure, count-reconciled against vLLM cached
+   token counters. Do not claim block-table/HBM residency, independent semantic
+   ground truth from vLLM, or cross-tier migration.
+5. **Nsight scope risk.** Nsight is auxiliary timeline evidence only. It can
+   support phase/kernel-activity intuition, but it is not a seventh workload and
+   should not drive the quantitative final-v3 comparison.
 
 ---
 
