@@ -1,4 +1,4 @@
-# Setup runbook — first bring-up
+# Setup runbook — RunPod bring-up
 
 Estimated time: 2–3 hours for first run. Subsequent: ~15 min to start a session.
 

@@ -1,6 +1,6 @@
 # EE 392C — Memory Lifetime Characterization of LLM Agent-Workflow Replays
 
-**Authors:** Minseok Kim, Kristen Guernsey
+**Authors:** Minseok Kim and Kristen Guernsey
 **Course:** EE 392C — Differentiated Memory Systems, Stanford Spring 2026 (Professor Tambe)
 
 <p align="center">

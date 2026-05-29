@@ -1,4 +1,4 @@
-# Inference engine
+# Project runtime
 # Pinned to CUDA-12-compatible builds (driver 570.x supports CUDA 12.8).
 # vllm 0.10.2 pulls torch 2.8.0+cu128. Newer vllm (>=0.20) requires CUDA 13.
 # transformers must stay <5: vllm 0.10.2 references Tokenizer APIs removed in 5.x.

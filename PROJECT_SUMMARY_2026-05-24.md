@@ -1,4 +1,4 @@
-# Project Summary — for Codex cross-check
+# Project Summary — archived planning context
 
 > **Current master-plan update (May 29, 2026):** final-v3 is now the active
 > project plan. The official quantitative dataset is the six paired workflow

@@ -1,4 +1,4 @@
-# Trace data — too large for git, store separately
+# Generated trace and profile artifacts
 traces/*.jsonl
 traces/*.parquet
 traces/*.nsys-rep

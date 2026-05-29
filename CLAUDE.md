@@ -1,5 +1,4 @@
 See `AGENTS.md` for project context.
 
-Claude Code-specific notes (none yet — add here only if a behavior cannot be
-expressed in `AGENTS.md` because it is Claude Code-only, e.g. slash commands,
-MCP server choices).
+Keep tool-specific notes here only when they cannot be expressed in
+`AGENTS.md`.

@@ -1,4 +1,4 @@
-# Locked technical decisions
+# Locked Technical Decisions
 
 These decisions are locked for the first pass. Revisit only if a downstream
 finding forces it. Document any change here with date and reason.
