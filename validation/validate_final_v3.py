@@ -3,6 +3,7 @@
 Checks:
   - v2 base fields still exist
   - v3 token spans are ordered and length-matched per prompt step
+  - every prompt-construction step carries an engine_cross_check event
   - cached-token attribution is exact or within one KV block
   - KV byte counts match token_count * kv_bytes_per_token
   - mutate creates a new logical version for the same object_id
@@ -115,6 +116,42 @@ def validate_cached_tokens(path: Path, events: list[dict]) -> list[str]:
     return errors
 
 
+def validate_cross_check_coverage(path: Path, events: list[dict]) -> list[str]:
+    """Require an engine_cross_check event on every prompt-construction step.
+
+    AGENTS.md makes ``cross_check_status="passed"`` a hard gate, but
+    ``validate_cached_tokens`` only inspects cross-check events that already
+    exist, so a truncated trace with zero cross-check events would pass
+    vacuously. We anchor coverage to the per-step KV prompt spans, which are
+    emitted independently during prompt construction, and require the two step
+    sets to coincide. This catches both a wholly missing gate and a gate that
+    silently drops individual generation steps.
+    """
+    errors = []
+    cc_steps = {
+        event["step"]
+        for event in events
+        if event.get("semantic_type") == "engine_cross_check"
+    }
+    span_steps = {
+        event["step"]
+        for event in events
+        if event.get("repr_type") == "kv_estimated"
+        and event.get("op") == "create"
+        and "token_offset_start" in event
+    }
+    if not cc_steps:
+        errors.append(f"{path}: no engine_cross_check events; cached-token gate not exercised")
+        return errors
+    missing = sorted(span_steps - cc_steps)
+    if missing:
+        errors.append(f"{path}: prompt steps {missing} missing engine_cross_check events")
+    extra = sorted(cc_steps - span_steps)
+    if extra:
+        errors.append(f"{path}: engine_cross_check steps {extra} have no prompt KV spans")
+    return errors
+
+
 def validate_metadata_warnings(path: Path, events: list[dict]) -> list[str]:
     warnings = []
     metadata = next((event for event in events if event.get("semantic_type") == "trace_metadata"), {})
@@ -196,6 +233,7 @@ def validate_trace(path: Path) -> tuple[list[str], list[str]]:
     errors.extend(validate_schema_version(path, events))
     errors.extend(validate_spans(path, events))
     errors.extend(validate_cached_tokens(path, events))
+    errors.extend(validate_cross_check_coverage(path, events))
     warnings.extend(validate_metadata_warnings(path, events))
     kv_errors, kv_warnings = validate_kv_sizes(path, events)
     errors.extend(kv_errors)

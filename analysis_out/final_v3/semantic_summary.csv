@@ -28,7 +28,6 @@ search_agent_broad.jsonl,search_agent,broad,assistant_history,14,1,260302594.663
 search_agent_broad.jsonl,search_agent,broad,plan_state,3,1,2460623.087,129,1,2,0
 search_agent_broad.jsonl,search_agent,broad,prompt_template,4,1,1573347.729,516096,1,0,0
 search_agent_broad.jsonl,search_agent,broad,retrieved_snippet,9,2,50416389.95,13306909,3,13,0
-search_agent_broad.jsonl,search_agent,broad,search_corpus_scan,2,2,502013.683,220930,3,0,0
 search_agent_broad.jsonl,search_agent,broad,search_result,9,2,170625330.444,45140611,3,13,0
 search_agent_broad.jsonl,search_agent,broad,system_prompt,6,1,15742061.276,5161860,4,11,0
 search_agent_broad.jsonl,search_agent,broad,user_problem,6,1,25186242.25,8259092,4,11,0
@@ -36,7 +35,6 @@ search_agent_targeted.jsonl,search_agent,targeted,assistant_history,14,1,2575093
 search_agent_targeted.jsonl,search_agent,targeted,plan_state,3,1,2418777.179,129,1,2,0
 search_agent_targeted.jsonl,search_agent,targeted,prompt_template,4,1,1564268.134,516096,1,0,0
 search_agent_targeted.jsonl,search_agent,targeted,retrieved_snippet,9,2,26001085.715,6940192,3,13,0
-search_agent_targeted.jsonl,search_agent,targeted,search_corpus_scan,2,2,496986.116,220930,3,0,0
 search_agent_targeted.jsonl,search_agent,targeted,search_result,9,2,52516955.526,13995163,3,13,0
 search_agent_targeted.jsonl,search_agent,targeted,system_prompt,6,1,15649006.865,5161860,4,11,0
 search_agent_targeted.jsonl,search_agent,targeted,user_problem,6,1,25037399.117,8259092,4,11,0

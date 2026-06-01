@@ -17,7 +17,9 @@ help:
 	@echo "  make cycle2-cx    Cycle 2 step 2: Codex writes adversarial assertions"
 	@echo ""
 	@echo "  make verify       Run the synthetic test and assertions"
-	@echo "  make verify-v3    Dry-run final-v3 traces, validate, and analyze"
+	@echo "  make verify-v3    Dry-run final-v3 traces, validate, and analyze CSVs"
+	@echo "  make verify-v3-validator  Run final-v3 validator regression checks"
+	@echo "  make verify-final-v3-artifacts  Validate checked-in H100 traces and regenerate outputs"
 	@echo "  make status       Show recent commits"
 	@echo ""
 
@@ -122,6 +124,8 @@ verify:
 verify-v3:
 	@echo "WARNING: verify-v3 uses dry-run traces. Dry-run byte-seconds are tracer-overhead-bound"
 	@echo "and must not be used for paper figures or cross-condition claims."
+	@echo "Dry-run figure rendering is intentionally skipped unless --allow-dry-run-figures"
+	@echo "is passed directly to analysis.final_v3 for local visual debugging."
 	@echo ""
 	@echo "Running final-v3 dry-run traces..."
 	python3 -m agent.run_final_v3 --all --dry-run --out-dir /tmp/final_v3_dryrun
@@ -129,8 +133,19 @@ verify-v3:
 	@echo "Validating final-v3 dry-run traces..."
 	python3 -m validation.validate_final_v3 /tmp/final_v3_dryrun/*.jsonl
 	@echo ""
-	@echo "Analyzing final-v3 dry-run traces..."
+	@echo "Analyzing final-v3 dry-run traces (CSVs only by default)..."
 	python3 -m analysis.final_v3 /tmp/final_v3_dryrun /tmp/final_v3_analysis /tmp/final_v3_figures
+
+verify-v3-validator:
+	@echo "Running final-v3 validator regression checks..."
+	python3 -m validation.assert_validate_final_v3
+
+verify-final-v3-artifacts:
+	@echo "Validating checked-in final-v3 H100 traces..."
+	python3 -m validation.validate_final_v3 traces/final_v3/*.jsonl
+	@echo ""
+	@echo "Regenerating final-v3 CSVs and figures from checked-in H100 traces..."
+	python3 -m analysis.final_v3 traces/final_v3
 
 status:
 	@echo ""
@@ -139,4 +154,4 @@ status:
 	@git log --oneline -20 2>/dev/null || echo "No commits yet."
 	@echo ""
 
-.PHONY: help cycle1-cc cycle1-cx cycle2-cc cycle2-cx verify verify-v3 status
+.PHONY: help cycle1-cc cycle1-cx cycle2-cc cycle2-cx verify verify-v3 verify-v3-validator verify-final-v3-artifacts status

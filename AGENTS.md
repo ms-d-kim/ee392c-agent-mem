@@ -33,6 +33,9 @@ reinterpret. `DECISIONS.md` is authoritative; `README.md` is summary.
 
 - Tracer v3, synthetic validation, final-v3 runner, final-v3 analysis, and
   optional system telemetry are implemented locally.
+- `validation.assert_validate_final_v3` exists as a local regression check for
+  final-v3 validator failure modes that the six checked-in traces do not
+  exercise directly.
 - Historical v2 traces live under `traces/batch_v2/`; the official final-v3
   H100 traces live under `traces/final_v3/`.
 - The final-v3 H100 six-trace sweep has passed
@@ -104,9 +107,11 @@ Don't add a linter config or formatting rules. Match what's already in the file.
 ## When you finish a task
 
 1. Run the synthetic test if you touched the tracer or analysis code.
-2. State what you did, in one paragraph, in the commit message.
-3. Do not include tool/vendor authorship tags in commit messages.
-4. Do not push without the human's say-so.
+2. Run `python3 -m validation.assert_validate_final_v3` if you touched
+   `validation/validate_final_v3.py` or cached-token gate logic.
+3. State what you did, in one paragraph, in the commit message.
+4. Do not include tool/vendor authorship tags in commit messages.
+5. Do not push without the human's say-so.
 
 ---
 

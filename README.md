@@ -58,7 +58,12 @@ not measured physical placement.
 ## Headline metrics
 
 1. **Lifetime** — task-bounded logical presence (create → last access)
-2. **Reuse count** — accesses after creation
+2. **Reuse count** — logical read events after creation. In the final-v3 CSVs
+   (`logical_read_events`) this counts representation-level prompt-construction
+   accesses: a text read and a token read of the same object on the same step
+   are two events, and cached-prefix KV reuse contributes its own reads. It is a
+   logical-access intensity signal, not a deduplicated count of distinct
+   revisits, and it is not a hardware memory-transaction count.
 3. **Memory footprint over time** — bytes per category, time series
 4. **Byte-seconds** — size × lifetime (capacity-time pressure)
 5. **Per-category logical access-vs-capacity split** — logical read events vs byte-seconds
@@ -90,7 +95,8 @@ The targeted and broad search traces scan the same expanded corpus size
 (88,372 B). The memory difference comes from what enters prompt history: broad
 search returns 2,318 B and inserts 672 B of selected snippets, while targeted
 search returns 691 B and inserts 350 B. Broad `search_result` logical KV is
-3.22x targeted search.
+3.22x targeted search. The scan-volume proxy stays in `search_funnel.csv`; the
+live-object byte-seconds and duplication summaries intentionally exclude it.
 
 ### 3. Compaction cuts retained raw-context pressure, with a reuse tradeoff
 
@@ -103,78 +109,33 @@ compaction-on has fewer total prompt tokens than compaction-off (12,364 vs
 22,234), but more new prefill tokens (5,740 vs 4,826) because inserting a
 summary disrupts the long leading prefix.
 
-## Historical v2 background
-
-The original v2 batch remains useful background, but the final report should use
-fresh v3 traces for cross-workload claims. v2 duplication factors are historical
-only: v2 assigned KV logical IDs at full-prompt granularity, so cross-representation
-duplication is not meaningfully measurable from that batch.
-
-### 1. Two object populations, six orders of magnitude apart in size
-
-![Lifetime vs size scatter](figures/fig1_lifetime_size_scatter.png)
-
-KV-cache blocks (10–50 MB, gray, top cluster) and logical content (10 B–1 KB,
-colored, bottom cluster) live in disjoint regions of the size–lifetime plane.
-They will never be well-served by a single memory tier.
-
-### 2. KV cache dominates byte-seconds but not bandwidth
-
-![Memory pressure timeline](figures/fig2_memory_pressure_timeline.png)
-
-Across one task (`hello_bug`, cache_on, t=0.0), live KV grows step-wise to
-42 MB while live logical content stays under 2 KB. The historical v2 aggregate
-CSV reports that KV holds **99.994% of byte-seconds but only 3.3% of logical
-read events**; logical content inverts that ratio. This is not a hardware
-bandwidth measurement.
-
-### 3. Proposed three-tier mapping
+## Tier-mapping implication
 
 ![DMS tier proposal](figures/fig4_dms_tier_proposal.svg)
 
-Anchored to the historical 20-trace v2 dataset. Caveat: tier labels are
-prescriptive from logical traces, not measured SRAM/HBM residency.
+The traces do not measure physical tier placement. They support a prescriptive
+mapping: small prompt scaffolding and reused state belong in the lowest-latency
+resident tier; active KV and recent context are bandwidth-sensitive; bulky
+lower-reuse retained context creates capacity pressure and is the natural target
+for larger/cheaper tiers.
 
-### 4. Reuse and lifetime are coupled, but by category
+## Historical v2 background
 
-![Reuse vs lifetime](figures/fig5_reuse_vs_lifetime.png)
+The original 20-trace v2 batch remains useful background, but the final report
+should use fresh v3 traces for cross-workload claims. v2 assigned KV logical IDs
+at full-prompt granularity, so cross-representation duplication is not
+meaningfully measurable from that batch.
 
-The reuse-lifetime scatter shows that "hot" objects are not always large, and
-large objects are not always hot. In memory-system terms: small/high-reuse
-state (system prompt, current user/problem text, frequently revisited tool and
-assistant snippets) wants high-bandwidth volatile tiers (SRAM/HBM), while
-large/lower-reuse KV regions want capacity-oriented tiers (HBM/DDR, and
-eventually CXL-attached capacity). This is a placement prescription, not a
-measured SRAM/HBM residency result.
+The durable v2 lesson is the logical access/capacity split: KV dominates
+capacity-time, while prompt/tool objects dominate logical read events. See
+`figures/fig1_lifetime_size_scatter.png`,
+`figures/fig3_capacity_vs_logical_reads.png`, and the other historical figures
+under `figures/` for appendix material.
 
-### 5. Reuse distribution with time-based lifetime buckets
-
-![Reuse histogram with lifetime composition](figures/fig6_reuse_hist_lifetime_stack.png)
-
-Lifetime buckets used in this figure are: **short** = [0, 1) seconds,
-**medium** = [1, 3) seconds, **long** = [3, inf) seconds.
-
-Stacking reuse counts by lifetime bucket makes the retention requirement
-explicit: most reused objects are short/medium lived, so low-latency volatile
-memory carries the critical path. Longer-lived low-reuse data is a better fit
-for larger, cheaper tiers (DDR or emerging NVM such as MRAM/RRAM if endurance
-and write-latency constraints are acceptable), where non-volatility and
-capacity matter more than peak bandwidth.
-
-### 6. Reuse distribution with conceptual memory classes
-
-![Reuse histogram with memory-class composition](figures/fig7_reuse_hist_memory_class_stack.png)
-
-This view uses the systems-oriented taxonomy directly: short-term = `kv_cache`,
-medium-term = `system_prompt` + `user_problem` + `assistant_output` +
-`tool_result`, long-term = `file_content`. It is a role-based mapping rather
-than a pure time-threshold mapping, and therefore better aligned with
-differentiated-tier design choices (bandwidth-critical volatile tiers vs
-capacity/retention-oriented tiers).
-
-Model weights are part of the long-term memory conceptually, but are not
-represented as per-object JSONL events in the current tracer and therefore do
-not appear in this figure.
+For cross-workload lifetime comparisons, prefer step-normalized lifetime over
+wall-clock seconds. Final-v3 diagnostic plots follow that convention, and
+`figures/final_v3/semantic_byte_steps.png` is the matching step-normalized
+semantic inventory view.
 
 ## Repo layout
 
@@ -189,11 +150,14 @@ figures/       Paper-ready figures + standalone SVGs
 tasks/         Task fixtures (hello_bug, recursion_bug)
 ```
 
-## Status (May 29, 2026)
+## Status (May 31, 2026)
 
-- Tracer v3 additive schema + final-v3 replay runner: in local implementation
+- Tracer v3 additive schema + final-v3 replay runner: implemented locally
 - Final-v3 H100 sweep: six real vLLM traces collected under `traces/final_v3/`
   and passing `validation.validate_final_v3`
+- Final-v3 validator regression check:
+  `python3 -m validation.assert_validate_final_v3` passes locally against
+  failure modes that the six checked-in traces do not exercise directly
 - Final-v3 system telemetry: collected under `traces/final_v3_system/`
 - Final-v3 analysis CSVs/figures: generated under `analysis_out/final_v3/`
   and `figures/final_v3/`
@@ -220,6 +184,12 @@ The second trace in each pair is an ablation, not a replicate. Do not report CIs
 or significance tests from these six traces. The search and compaction replays
 expand small seed fixtures deterministically at runtime so prompt shape is large
 enough to stress retrieval/compaction without storing bulky synthetic files.
+
+Run the synthetic gate, the validator regression check
+(`python3 -m validation.assert_validate_final_v3`), and a single real trace
+first (see `SETUP.md` §"final-v3 run order") to confirm cached-token
+extraction is not `unavailable` before collecting the full six-trace sweep with
+`--all`:
 
 ```
 python3 -m agent.run_final_v3 --all --out-dir traces/final_v3 \

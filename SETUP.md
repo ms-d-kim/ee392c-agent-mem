@@ -158,14 +158,15 @@ issues), append them to `TROUBLESHOOTING.md` in the repo root and commit.
 
 Once the bring-up runbook above succeeds end-to-end, use the final-v3 path:
 
-1. Run `python -m validation.synthetic --output /tmp/synthetic_v3.jsonl`.
-2. Run `python -m validation.assert_synthetic /tmp/synthetic_v3.jsonl`.
-3. Run one real final-v3 trace with `agent.run_final_v3` and verify
+1. Run `python3 -m validation.synthetic --output /tmp/synthetic_v3.jsonl`.
+2. Run `python3 -m validation.assert_synthetic /tmp/synthetic_v3.jsonl`.
+3. Run `python3 -m validation.assert_validate_final_v3`.
+4. Run one real final-v3 trace with `agent.run_final_v3` and verify
    `validation.validate_final_v3` does not report cached-token API unavailable.
-4. Run all six final-v3 traces under `traces/final_v3/`.
-5. Run `analysis.final_v3` to produce final CSVs and figures.
+5. Run all six final-v3 traces under `traces/final_v3/`.
+6. Run `analysis.final_v3` to produce final CSVs and figures.
 
-**Current H100 status (2026-05-29):** steps 1-5 have passed for the six
+**Current H100 status (2026-05-29):** steps 1-6 have passed for the six
 final-v3 traces on RunPod H100. Keep these traces as the official final-v3
 dataset unless `DECISIONS.md` is explicitly revised again.
 

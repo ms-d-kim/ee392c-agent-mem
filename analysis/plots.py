@@ -15,9 +15,30 @@ from __future__ import annotations
 
 import glob
 import json
+import os
 import sys
+import tempfile
 from collections import defaultdict
 from pathlib import Path
+
+
+def _configure_matplotlib_cache():
+    """Point Matplotlib at a writable cache dir when HOME is restricted."""
+    if os.environ.get("MPLCONFIGDIR"):
+        return
+    default = Path.home() / ".matplotlib"
+    try:
+        default.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        default = None
+    if default is not None and os.access(default, os.W_OK | os.X_OK):
+        return
+    cache_dir = Path(tempfile.gettempdir()) / "ee392c-mplcache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    os.environ["MPLCONFIGDIR"] = str(cache_dir)
+
+
+_configure_matplotlib_cache()
 
 import matplotlib as mpl
 import matplotlib.patches as patches
@@ -254,8 +275,8 @@ def _fmt_pct(p):
 
 
 def fig3_dichotomy(traces_dir, out_base):
-    """Bytes-seconds vs read events by category."""
-    paths = sorted(glob.glob(f"{traces_dir}/hello_bug*.jsonl"))
+    """Byte-seconds vs read events by category, aggregated over the full v2 batch."""
+    paths = sorted(glob.glob(f"{traces_dir}/*.jsonl"))
     bs = defaultdict(float)
     rd = defaultdict(int)
     for p in paths:
@@ -312,7 +333,7 @@ def fig3_dichotomy(traces_dir, out_base):
 
 
 def fig4_tier_diagram(out_base):
-    """Paper-style tier mapping diagram."""
+    """Prescriptive tier-mapping diagram from logical trace evidence."""
     fig, ax = plt.subplots(figsize=(9, 5.6))
     # No aspect=equal — let the data coords fill the axes naturally
     ax.set_xlim(0, 12)
@@ -324,23 +345,23 @@ def fig4_tier_diagram(out_base):
         {
             "y_bot": 7.4, "y_top": 9.0,
             "fill": "#FAECE7", "edge": "#7C2D14",
-            "title": "Tier 1 — Always-resident (highest-bandwidth proposed tier)",
-            "body": "System prompt + user problem",
-            "spec": "Size ~600 B  ·  Lifetime = full task  ·  Read every step",
+            "title": "Tier 1 - Always-resident proposed tier",
+            "body": "System prompt, user/problem framing, small reused state",
+            "spec": "Small footprint, full-workflow lifetime, logical read every step",
         },
         {
             "y_bot": 5.0, "y_top": 6.6,
             "fill": "#FBF1DC", "edge": "#7C5510",
-            "title": "Tier 2 — Bandwidth-oriented tier",
-            "body": "Active KV (current + next step), recent messages",
-            "spec": "10–25 MB per step  ·  Lifetime 1–2 steps  ·  61% of reads",
+            "title": "Tier 2 - Bandwidth-oriented proposed tier",
+            "body": "Active KV snapshot, recent messages, high-reuse context",
+            "spec": "Latency-sensitive logical accesses; placement recommendation only",
         },
         {
             "y_bot": 2.6, "y_top": 4.2,
             "fill": "#E6F1FB", "edge": "#0C447C",
-            "title": "Tier 3 — Capacity-oriented tier (DDR / CXL / NVMe)",
-            "body": "KV blocks past their next-read window",
-            "spec": "Migratable once cache-hit consumed  ·  ~100% byte-seconds  ·  3% of reads",
+            "title": "Tier 3 - Capacity-oriented proposed tier",
+            "body": "Large lower-reuse KV pressure and retained context",
+            "spec": "Capacity-time pressure dominates; no cross-tier migration measured",
         },
     ]
 
@@ -367,13 +388,12 @@ def fig4_tier_diagram(out_base):
             arrowprops=dict(arrowstyle="-|>", color="#999",
                             lw=0.9, mutation_scale=14))
 
-    # Left side: arrow points UP toward the fastest tier
-    # (bandwidth and $/bit are both highest at Tier 1)
+    # Left side: arrow points UP toward the fastest, most expensive tier.
     ax.annotate(
         "", xy=(1.2, 9.0), xytext=(1.2, 2.6),
         arrowprops=dict(arrowstyle="-|>", color="#666",
                         lw=1.0, mutation_scale=14))
-    ax.text(0.9, 5.8, "Bandwidth · $/bit",
+    ax.text(0.9, 5.8, "Lower latency / higher cost per bit",
             rotation=90, fontsize=10, color="#666",
             ha="center", va="center", style="italic")
 
@@ -388,18 +408,18 @@ def fig4_tier_diagram(out_base):
             ha="center", va="center", style="italic")
 
     # Title + subtitle
-    ax.text(6.0, 10.1, "Proposed prescriptive tier mapping for coding-agent inference",
+    ax.text(6.0, 10.1, "Proposed prescriptive tier mapping",
             fontsize=13, color="#222", ha="center", va="center",
             fontweight="medium")
-    ax.text(6.0, 9.65, "anchored to 20-trace v2 dataset (Qwen2.5-Coder-7B, vLLM 0.6.6, RTX 4090 24 GB)",
+    ax.text(6.0, 9.65, "derived from logical semantic/KV traces; not measured physical placement",
             fontsize=10, color="#888", ha="center", va="center", style="italic")
 
     # Caveat
     ax.text(BOX_LEFT, 1.7,
-            "Caveat: tier labels are prescriptions from logical traces, not measured SRAM/HBM residency.",
+            "Caveat: tier labels are prescriptions from semantic/token/KV observations.",
             fontsize=9, color="#888", va="center", style="italic")
     ax.text(BOX_LEFT, 1.2,
-            "MB/step and read-share annotations come from the historical v2 batch.",
+            "Use final-v3 CSVs for updated numbers; historical v2 figures are background only.",
             fontsize=9, color="#888", va="center", style="italic")
 
     fig.savefig(out_base.with_suffix(".png"), facecolor="white", dpi=200)
@@ -577,7 +597,7 @@ def main():
     print(f"Reading traces from {traces_dir}")
     fig1_scatter(traces_dir, out_dir / "fig1_lifetime_size_scatter")
     fig2_timeline(traces_dir, out_dir / "fig2_memory_pressure_timeline")
-    fig3_dichotomy(traces_dir, out_dir / "fig3_capacity_vs_bandwidth")
+    fig3_dichotomy(traces_dir, out_dir / "fig3_capacity_vs_logical_reads")
     fig4_tier_diagram(out_dir / "fig4_dms_tier_proposal")
     fig5_reuse_lifetime(traces_dir, out_dir / "fig5_reuse_vs_lifetime")
     fig6_reuse_hist_lifetime_stack(traces_dir, out_dir / "fig6_reuse_hist_lifetime_stack")
