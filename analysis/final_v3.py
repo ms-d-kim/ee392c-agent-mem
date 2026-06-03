@@ -865,6 +865,93 @@ def retention_class_color(retention_class: str) -> str:
     return RETENTION_CLASS_COLORS.get(retention_class, "#888888")
 
 
+def object_reuse_intervals(events: list[dict]) -> list[dict]:
+    by_oid: dict[str, list[float]] = defaultdict(list)
+    for event in sorted(events, key=lambda e: (e.get("object_id"), e.get("ts", 0.0))):
+        if event.get("op") != "read":
+            continue
+        if is_bookkeeping_event(event):
+            continue
+        oid = event.get("object_id")
+        if oid is None:
+            continue
+        by_oid[oid].append(float(event["ts"]))
+
+    lifetime_by_oid = {interval["object_id"]: interval for interval in liveness_intervals(events)}
+    intervals = []
+    for oid, ts_list in by_oid.items():
+        if len(ts_list) < 2:
+            continue
+        lifetime = lifetime_by_oid.get(oid)
+        if lifetime is None:
+            continue
+        retention = object_retention_class(lifetime)
+        for prev_ts, next_ts in zip(ts_list, ts_list[1:]):
+            intervals.append({
+                "object_id": oid,
+                "interval_s": next_ts - prev_ts,
+                "retention": retention,
+            })
+    return intervals
+
+
+def reuse_interval_by_workload(traces: list[tuple[Path, str, str, list[dict]]], out_path: Path) -> None:
+    if plt is None:
+        return
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    default_traces = [
+        (workload, condition, events)
+        for _, workload, condition, events in traces
+        if DEFAULT_CONDITION.get(workload) == condition
+    ]
+    if not default_traces:
+        return
+
+    fig, axes = plt.subplots(1, len(default_traces), figsize=(13.5, 4.8), sharey=True)
+    if len(default_traces) == 1:
+        axes = [axes]
+
+    for ax, (workload, _, events) in zip(axes, default_traces):
+        intervals = object_reuse_intervals(events)
+        short_vals = [item["interval_s"] for item in intervals if item["retention"] == "short-term"]
+        medium_vals = [item["interval_s"] for item in intervals if item["retention"] == "medium-term"]
+
+        values = []
+        labels = []
+        colors = []
+        if short_vals:
+            values.append(short_vals)
+            labels.append("short-term")
+            colors.append(RETENTION_CLASS_COLORS["short-term"])
+        if medium_vals:
+            values.append(medium_vals)
+            labels.append("medium-term")
+            colors.append(RETENTION_CLASS_COLORS["medium-term"])
+        if not values:
+            ax.text(0.5, 0.5, "no reuse intervals", ha="center", va="center", color="#777")
+            ax.set_xticks([])
+            ax.set_title(label_workload(workload), fontsize=11)
+            continue
+
+        bp = ax.boxplot(values, patch_artist=True, labels=labels, medianprops={"color": "black"})
+        for patch, color in zip(bp["boxes"], colors):
+            patch.set_facecolor(color)
+            patch.set_alpha(0.75)
+
+        ax.set_title(label_workload(workload), fontsize=11)
+        ax.set_xlabel("Retention class")
+        ax.set_yscale("log")
+        ax.grid(axis="y", alpha=0.18)
+        if ax is axes[0]:
+            ax.set_ylabel("Reuse interval (s)")
+
+    fig.suptitle("Reuse interval by workload and retention class", x=0.06, ha="left")
+    fig.tight_layout(rect=(0, 0.03, 1, 0.95))
+    fig.savefig(out_path.with_suffix(".png"), dpi=180)
+    fig.savefig(out_path.with_suffix(".svg"))
+    plt.close(fig)
+
+
 def lifetime_reuse_seconds(traces: list[tuple[Path, str, str, list[dict]]], out_path: Path) -> None:
     if plt is None:
         return
@@ -987,6 +1074,159 @@ def workload_lifetime_buckets(traces: list[tuple[Path, str, str, list[dict]]], o
         color="#555",
     )
     fig.tight_layout(rect=(0, 0.03, 1, 0.95))
+    fig.savefig(out_path.with_suffix(".png"), dpi=180)
+    fig.savefig(out_path.with_suffix(".svg"))
+    plt.close(fig)
+
+
+def workload_retention_composition(traces: list[tuple[Path, str, str, list[dict]]], out_path: Path) -> None:
+    if plt is None:
+        return
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    bucket_counts = defaultdict(lambda: {"short-term": 0, "medium-term": 0, "long-term": 0})
+    for _, workload, _, events in traces:
+        for interval in liveness_intervals(events):
+            bucket = object_retention_class(interval)
+            bucket_counts[workload][bucket] += 1
+
+    workloads = [workload for workload in DEFAULT_CONDITION if workload in bucket_counts]
+    if not workloads:
+        return
+
+    xs = list(range(len(workloads)))
+    short_values = [bucket_counts[workload]["short-term"] for workload in workloads]
+    medium_values = [bucket_counts[workload]["medium-term"] for workload in workloads]
+    long_values = [bucket_counts[workload]["long-term"] for workload in workloads]
+    totals = [short_values[i] + medium_values[i] + long_values[i] for i in range(len(workloads))]
+    if any(total == 0 for total in totals):
+        return
+
+    short_pct = [100 * short_values[i] / totals[i] for i in range(len(workloads))]
+    medium_pct = [100 * medium_values[i] / totals[i] for i in range(len(workloads))]
+    long_pct = [100 * long_values[i] / totals[i] for i in range(len(workloads))]
+
+    fig, ax = plt.subplots(figsize=(8.5, 5.0))
+    ax.bar(xs, short_pct, color=RETENTION_CLASS_COLORS["short-term"], label="short-term")
+    ax.bar(xs, medium_pct, bottom=short_pct, color=RETENTION_CLASS_COLORS["medium-term"], label="medium-term")
+    if any(value > 0 for value in long_pct):
+        ax.bar(xs, long_pct, bottom=[short_pct[i] + medium_pct[i] for i in range(len(xs))], color=RETENTION_CLASS_COLORS["long-term"], label="long-term")
+
+    ax.set_xticks(xs)
+    ax.set_xticklabels([label_workload(workload) for workload in workloads])
+    ax.set_ylabel("Percent of objects")
+    ax.set_xlabel("Workload")
+    ax.set_title("Retention-class composition by workload", loc="left")
+    ax.set_ylim(0, 100)
+    ax.grid(axis="y", alpha=0.18)
+    ax.legend(title="Retention class")
+    ax.text(
+        0.02,
+        0.02,
+        "Short-term = within-step; medium-term = across steps; long-term = not observed in current traces.",
+        transform=fig.transFigure,
+        fontsize=8.5,
+        color="#555",
+    )
+    fig.tight_layout()
+    fig.savefig(out_path.with_suffix(".png"), dpi=180)
+    fig.savefig(out_path.with_suffix(".svg"))
+    plt.close(fig)
+
+
+def semantic_retention_by_class(traces: list[tuple[Path, str, str, list[dict]]], out_path: Path) -> None:
+    if plt is None:
+        return
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    default_traces = [
+        (workload, condition, events)
+        for _, workload, condition, events in traces
+        if DEFAULT_CONDITION.get(workload) == condition
+    ]
+    if not default_traces:
+        return
+
+    workloads = [workload for workload in DEFAULT_CONDITION if any(w == workload for w, _, _ in default_traces)]
+    semantic_classes = [sem for sem in SEMANTIC_LABELS if any(
+        any(interval["semantic_type"] == sem for interval in liveness_intervals(events))
+        for _, _, events in default_traces
+    )]
+    if not semantic_classes:
+        return
+
+    counts = {
+        workload: {
+            sem: {"short-term": 0, "medium-term": 0, "long-term": 0}
+            for sem in semantic_classes
+        }
+        for workload in workloads
+    }
+    for workload, _, events in default_traces:
+        for interval in liveness_intervals(events):
+            sem = interval["semantic_type"]
+            if sem not in semantic_classes:
+                continue
+            counts[workload][sem][object_retention_class(interval)] += 1
+
+    semantic_classes = [sem for sem in semantic_classes if any(
+        counts[workload][sem]["short-term"] + counts[workload][sem]["medium-term"] + counts[workload][sem]["long-term"]
+        for workload in workloads
+    )]
+    if not semantic_classes:
+        return
+
+    fig, axes = plt.subplots(1, len(workloads), figsize=(14, 5.4), sharey=True)
+    if len(workloads) == 1:
+        axes = [axes]
+
+    for ax, workload in zip(axes, workloads):
+        short_pct = []
+        medium_pct = []
+        long_pct = []
+        for sem in semantic_classes:
+            total = sum(counts[workload][sem].values())
+            if total:
+                short_pct.append(100 * counts[workload][sem]["short-term"] / total)
+                medium_pct.append(100 * counts[workload][sem]["medium-term"] / total)
+                long_pct.append(100 * counts[workload][sem]["long-term"] / total)
+            else:
+                short_pct.append(0.0)
+                medium_pct.append(0.0)
+                long_pct.append(0.0)
+
+        x = list(range(len(semantic_classes)))
+        ax.bar(x, short_pct, color=RETENTION_CLASS_COLORS["short-term"], label="short-term")
+        ax.bar(x, medium_pct, bottom=short_pct, color=RETENTION_CLASS_COLORS["medium-term"], label="medium-term")
+        if any(long_pct):
+            bottom = [short_pct[i] + medium_pct[i] for i in range(len(x))]
+            ax.bar(x, long_pct, bottom=bottom, color=RETENTION_CLASS_COLORS["long-term"], label="long-term")
+
+        ax.set_title(label_workload(workload), fontsize=11)
+        ax.set_xticks(x)
+        ax.set_xticklabels([label_semantic(sem) for sem in semantic_classes], rotation=45, ha="right")
+        ax.set_xlabel("Semantic class")
+        ax.grid(axis="y", alpha=0.18)
+        if ax is axes[0]:
+            ax.set_ylabel("Percent of objects")
+
+    fig.suptitle("Short-term vs medium-term retention by semantic class and workload", x=0.06, ha="left")
+    handles, labels = [], []
+    for ax in axes:
+        for handle, label in zip(*ax.get_legend_handles_labels()):
+            if label not in labels:
+                handles.append(handle)
+                labels.append(label)
+    if handles:
+        fig.legend(
+            handles=handles,
+            labels=labels,
+            loc="lower center",
+            bbox_to_anchor=(0.5, -0.08),
+            ncol=min(3, len(labels)),
+            frameon=False,
+        )
+    fig.tight_layout(rect=(0, 0.06, 1, 0.92))
     fig.savefig(out_path.with_suffix(".png"), dpi=180)
     fig.savefig(out_path.with_suffix(".svg"))
     plt.close(fig)
@@ -1132,6 +1372,9 @@ def main(argv: list[str]) -> int:
     scatter_lifetime_reuse(traces, fig_dir / "lifetime_reuse")
     lifetime_reuse_seconds(traces, fig_dir / "lifetime_reuse_seconds")
     workload_lifetime_buckets(traces, fig_dir / "lifetime_buckets_by_workload")
+    workload_retention_composition(traces, fig_dir / "workload_retention_composition")
+    semantic_retention_by_class(traces, fig_dir / "semantic_retention_by_class")
+    reuse_interval_by_workload(traces, fig_dir / "reuse_interval_by_workload")
     step_duration_figure(traces, fig_dir / "step_duration_by_workload")
     print(f"Wrote CSVs to {out_dir}")
     if plt is None:
