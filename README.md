@@ -17,8 +17,8 @@ with the goal of informing how application-level data classes should map onto a
 tiered (differentiated) memory system. The final artifact uses deterministic
 multi-step **agent-workflow replays**: coding, search/retrieval, and
 context-growth compaction. The headline is cross-workload variability: the same
-semantic class can have different lifetime, reuse, token, KV, and duplication
-behavior depending on workflow shape.
+semantic class can have different lifetime, reuse, token, KV, duplication, and
+cross-step carry-over behavior depending on workflow shape.
 
 This is exploratory characterization, not a generalizable benchmark. Findings
 are tightly coupled to Qwen2.5-Coder-7B-Instruct + vLLM and a small replay set.
@@ -36,6 +36,20 @@ structure" is honest; "autonomous production agents broadly" is overclaiming.
 - **Compute:** RunPod NVIDIA H100 80GB HBM3
 - **Historical v2 tasks:** 2 hand-crafted fixtures (`hello_bug`, `recursion_bug`) ×
   5 sampling temperatures × 2 cache modes (prefix caching on/off) = 20 traces
+
+## Methodology
+
+<p align="center">
+  <img src="figures/final_v3/methodology.png" alt="Methodology pipeline" width="52%">
+</p>
+
+This is an experimental framework + analysis pipeline (not a simulator or
+hardware model): scripted workload fixtures → deterministic replay runner
+(`agent/run_final_v3.py`) → three instrumentation streams (logical tracer, system
+telemetry, auxiliary Nsight) → validation gates (synthetic oracle + final-v3
+validator) → analysis modules → prescriptive tier mapping. Regenerate with
+`python3 -m analysis.methodology`; `figures/final_v3/methodology.md` is an
+image-model brief for redrawing it.
 
 ## Telemetry — logical layer
 
@@ -70,6 +84,11 @@ not measured physical placement.
    per category (this is the novel angle vs GainSight: GainSight measures
    activation lifetime within a single forward pass; we measure logical-object
    lifetime across workflow steps)
+6. **Cross-step carry-over** — per generate step, the projected-KV working set
+   split into newly-prefilled vs carried-from-an-earlier-step bytes
+   (`analysis/carryover.py` → `carryover.csv`,
+   `figures/final_v3/carryover_kv_origin.png`). This makes the GainSight
+   differentiation concrete and quantitative.
 
 ## Final-v3 H100 findings
 
@@ -109,6 +128,24 @@ compaction-on has fewer total prompt tokens than compaction-off (12,364 vs
 22,234), but more new prefill tokens (5,740 vs 4,826) because inserting a
 summary disrupts the long leading prefix.
 
+### 4. Agent workflows are carry-over-dominated across steps
+
+![Cross-step carry-over](figures/final_v3/carryover_kv_origin.png)
+
+At each generate step the runner re-reads and re-projects every still-active
+object, so the per-step KV working set splits into newly-prefilled bytes versus
+carried-from-an-earlier-step bytes (`analysis/carryover.py`). By the final step
+of every default trace, **87–99% of the projected-KV working set originates in an
+earlier step** rather than being new work. Compaction is the only mechanism that
+resets this: compaction-on drops to 46% carried at the demotion step (step 3),
+while every other trace stays above 90%. This is the cross-step view that
+distinguishes the project from GainSight's within-pass profiling, and it directly
+motivates caching reused prefixes and demoting bulky low-reuse context. Kristen's
+retention/reuse diagnostics (`semantic_retention_by_class`,
+`reuse_interval_by_workload`, `workload_retention_composition`,
+`lifetime_reuse_seconds`, `lifetime_buckets_by_workload`,
+`step_duration_by_workload`) slice the same behavior by semantic class.
+
 ## Tier-mapping implication
 
 ![DMS tier proposal](figures/fig4_dms_tier_proposal.svg)
@@ -143,14 +180,15 @@ semantic inventory view.
 agent/         Agent code + JSONL tracer + matrix runner
 serving/       vLLM launch helpers
 validation/    Synthetic-agent test (tracer correctness contract)
-analysis/      Trace parsing + per-category breakdown
+analysis/      Trace parsing, per-category, cross-step carry-over, Nsight
+               profile analysis, and methodology/slide figure generators
 analysis_out/  Generated summary CSVs
 traces/        Historical v2 traces plus final-v3 H100 trace artifacts
 figures/       Paper-ready figures + standalone SVGs
 tasks/         Task fixtures (hello_bug, recursion_bug)
 ```
 
-## Status (May 31, 2026)
+## Status (June 3, 2026)
 
 - Tracer v3 additive schema + final-v3 replay runner: implemented locally
 - Final-v3 H100 sweep: six real vLLM traces collected under `traces/final_v3/`
@@ -161,9 +199,20 @@ tasks/         Task fixtures (hello_bug, recursion_bug)
 - Final-v3 system telemetry: collected under `traces/final_v3_system/`
 - Final-v3 analysis CSVs/figures: generated under `analysis_out/final_v3/`
   and `figures/final_v3/`
+- Cross-step carry-over analysis: `analysis/carryover.py` →
+  `analysis_out/final_v3/carryover.csv` +
+  `figures/final_v3/carryover_kv_origin.png`
+- Methodology flowchart: `analysis/methodology.py` →
+  `figures/final_v3/methodology.png` (image-model brief in `methodology.md`)
 - Auxiliary Nsight Systems profile: one H100 compaction trace under
-  `traces/final_v3_nsight/` with report
-  `analysis_out/final_v3/nsight_compaction_on.nsys-rep`
+  `traces/final_v3_nsight/`, now analyzed by `analysis/nsight.py` into
+  `figures/final_v3/nsight_phase_kernels.png` + `nsight_summary.csv` (NVTX phase
+  timeline, ~86% GEMM kernel mix, memcpy volume); the raw
+  `nsight_compaction_on.nsys-rep` is local-only (gitignored)
+- Repo cleanup: removed unused LangGraph/transformers stubs (`agent/run.py`,
+  `agent/graph.py`, `agent/tools.py`, `analysis/duplication.py`) and their
+  `requirements.txt` pins; `SETUP.md` marks the `vllm serve` path as an optional
+  smoke test (the final-v3 runner uses in-process `vllm.LLM`)
 - Historical 20-trace v2 batch + summary CSV + per-category CSV: in repo
 - Historical paper-ready v2 figures (`figures/fig1`–`fig7`): in repo
 - Optional system telemetry is auxiliary; final claims should not depend on it
