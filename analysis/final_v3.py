@@ -708,22 +708,25 @@ def search_funnel_figure(rows: list[dict], out_path: Path) -> None:
     ax.bar([i + width / 2 for i in x], inserted, width=width, label="inserted", color=COLORS["retrieved_snippet"])
     ax.set_xticks(list(x), labels)
     ax.set_ylabel("bytes")
-    ax.set_title("Search prompt pollution by condition", loc="left")
+    # Title sits high (pad) so the scan caption can tuck just beneath it
+    # without the two overlapping.
+    ax.set_title("Search prompt pollution by condition", loc="left", pad=26, fontsize=12)
     unique_scanned = sorted({int(value) for value in scanned})
     if len(unique_scanned) == 1:
         ax.text(
             0.0,
-            1.02,
+            1.015,
             f"Both traces scan {compact_number(unique_scanned[0])}B; difference is returned/inserted prompt history.",
             transform=ax.transAxes,
             fontsize=8.5,
             color="#555555",
             va="bottom",
+            ha="left",
         )
     ax.legend(frameon=False)
     fig.tight_layout()
-    fig.savefig(out_path.with_suffix(".png"), dpi=180)
-    fig.savefig(out_path.with_suffix(".svg"))
+    fig.savefig(out_path.with_suffix(".png"), dpi=180, bbox_inches="tight")
+    fig.savefig(out_path.with_suffix(".svg"), bbox_inches="tight")
     plt.close(fig)
 
 
