@@ -11,6 +11,7 @@ import json
 import os
 import sys
 import tempfile
+import statistics
 from collections import defaultdict
 from pathlib import Path
 
@@ -85,6 +86,12 @@ CONDITION_LABELS = {
     "broad": "broad",
     "compaction_on": "compaction on",
     "compaction_off": "compaction off",
+}
+
+RETENTION_CLASS_COLORS = {
+    "short-term": "#A7D8C8",
+    "medium-term": "#6FB39A",
+    "long-term": "#2C7A62",
 }
 
 SEMANTIC_LABELS = {
@@ -285,6 +292,53 @@ def make_interval(
         "lifetime_steps": max(0, end_step - event["step"]),
         "read_count": state["read_count"],
     }
+
+
+def step_duration_summary(traces: list[tuple[Path, str, str, list[dict]]]) -> dict[str, dict[str, float]]:
+    durations_by_workload: dict[str, list[float]] = defaultdict(list)
+    default_traces = [
+        (workload, condition, events)
+        for _, workload, condition, events in traces
+        if DEFAULT_CONDITION.get(workload) == condition
+    ]
+    for workload, _, events in default_traces:
+        by_step: dict[int, list[float]] = defaultdict(list)
+        for event in events:
+            if "step" not in event or "ts" not in event:
+                continue
+            by_step[event["step"]].append(float(event["ts"]))
+        for ts_list in by_step.values():
+            if ts_list:
+                durations_by_workload[workload].append(max(ts_list) - min(ts_list))
+    summary: dict[str, dict[str, float]] = {}
+    for workload, durations in durations_by_workload.items():
+        if not durations:
+            continue
+        summary[workload] = {
+            "min": min(durations),
+            "median": statistics.median(durations),
+            "max": max(durations),
+        }
+    return summary
+
+
+def format_step_duration_note(summary: dict[str, dict[str, float]]) -> str:
+    if not summary:
+        return (
+            "Short-term = within-step tool use. "
+            "Medium-term = session-retained objects."
+        )
+    ranges = []
+    for workload in DEFAULT_CONDITION:
+        if workload in summary:
+            values = summary[workload]
+            ranges.append(
+                f"{label_workload(workload)}: {values['min']:.2f}–{values['max']:.2f}s"
+            )
+    return (
+        "Short-term = within-step tool use. Medium-term = session-retained objects. "
+        "Single-step durations in default traces: " + "; ".join(ranges) + "."
+    )
 
 
 def write_csv(path: Path, rows: list[dict], fieldnames: list[str]) -> None:
@@ -541,6 +595,7 @@ def bar_figure(
     out_path: Path,
     title: str,
     x_label: str | None = None,
+    value_format: str | None = None,
 ) -> None:
     if plt is None:
         return
@@ -569,7 +624,8 @@ def bar_figure(
     ax.grid(axis="y", alpha=0)
     right = max(values) if values else 1.0
     for idx, value in enumerate(values):
-        ax.text(value + right * 0.015, idx, compact_number(value), va="center", fontsize=8.5, color="#555")
+        label = format(value, value_format) if value_format else compact_number(value)
+        ax.text(value + right * 0.015, idx, label, va="center", fontsize=8.5, color="#555")
     ax.set_xlim(0, right * 1.18 if right > 0 else 1)
     fig.tight_layout()
     fig.savefig(out_path.with_suffix(".png"), dpi=180)
@@ -693,6 +749,43 @@ def prompt_cache_figure(rows: list[dict], out_path: Path) -> None:
     plt.close(fig)
 
 
+def step_duration_figure(traces: list[tuple[Path, str, str, list[dict]]], out_path: Path) -> None:
+    if plt is None:
+        return
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    summary = step_duration_summary(traces)
+    if not summary:
+        return
+    workloads = [w for w in DEFAULT_CONDITION if w in summary]
+    if not workloads:
+        return
+    y = list(range(len(workloads)))
+    mins = [summary[workload]["min"] for workload in workloads]
+    maxs = [summary[workload]["max"] for workload in workloads]
+    medians = [summary[workload]["median"] for workload in workloads]
+    widths = [maxs[i] - mins[i] for i in y]
+    fig, ax = plt.subplots(figsize=(8.5, 4.0))
+    ax.barh(y, widths, left=mins, height=0.6, color="#76B7B2", alpha=0.75)
+    ax.scatter(medians, y, marker="o", color="#222222", zorder=3, label="median")
+    ax.set_yticks(y, [label_workload(workload) for workload in workloads])
+    ax.set_xlabel("Single-step duration (seconds)")
+    ax.set_title("Single-step time ranges for default final-v3 workloads", loc="left")
+    ax.set_xlim(0, max(maxs) * 1.12 if maxs else 1.0)
+    ax.grid(axis="x", alpha=0.18)
+    ax.legend(frameon=False)
+    fig.text(
+        0.02,
+        0.02,
+        "Durations are max(ts)-min(ts) for each step in default traces.",
+        fontsize=8.5,
+        color="#555",
+    )
+    fig.tight_layout()
+    fig.savefig(out_path.with_suffix(".png"), dpi=180)
+    fig.savefig(out_path.with_suffix(".svg"))
+    plt.close(fig)
+
+
 def scatter_lifetime_reuse(traces: list[tuple[Path, str, str, list[dict]]], out_path: Path) -> None:
     if plt is None:
         return
@@ -743,8 +836,157 @@ def scatter_lifetime_reuse(traces: list[tuple[Path, str, str, list[dict]]], out_
     axes[0].set_ylabel("Read events")
     fig.suptitle("Step-normalized lifetime vs reuse by semantic class (default traces)", x=0.06, ha="left")
     if legend_items:
-        fig.legend(handles=legend_items, loc="center left", bbox_to_anchor=(0.98, 0.5), frameon=False)
-    fig.tight_layout(rect=(0, 0, 0.9, 0.93))
+        fig.legend(
+            handles=legend_items,
+            loc="upper left",
+            bbox_to_anchor=(1.02, 0.99),
+            frameon=False,
+        )
+    fig.tight_layout(rect=(0, 0.03, 0.88, 0.93))
+    fig.savefig(out_path.with_suffix(".png"), dpi=180, bbox_inches="tight")
+    fig.savefig(out_path.with_suffix(".svg"), bbox_inches="tight")
+    plt.close(fig)
+
+
+def object_retention_class(interval: dict) -> str:
+    """Classify objects by workflow-relative retention.
+
+    short-term: object exists only within a single step or tool-use boundary
+      (single-step times are workload-dependent in these traces).
+    medium-term: object persists across multiple steps in the current session.
+    long-term: not present in current single-run traces.
+    """
+    if interval["lifetime_steps"] == 0:
+        return "short-term"
+    return "medium-term"
+
+
+def retention_class_color(retention_class: str) -> str:
+    return RETENTION_CLASS_COLORS.get(retention_class, "#888888")
+
+
+def lifetime_reuse_seconds(traces: list[tuple[Path, str, str, list[dict]]], out_path: Path) -> None:
+    if plt is None:
+        return
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    default_traces = [
+        (workload, condition, events)
+        for _, workload, condition, events in traces
+        if DEFAULT_CONDITION.get(workload) == condition
+    ]
+    if not default_traces:
+        return
+
+    fig, axes = plt.subplots(1, len(default_traces), figsize=(13.5, 4.6), sharex=True, sharey=True)
+    if len(default_traces) == 1:
+        axes = [axes]
+    legend_items = []
+    seen = set()
+    max_y = 0
+
+    for ax, (workload, _, events) in zip(axes, default_traces):
+        for interval in liveness_intervals(events):
+            x = interval["lifetime_s"]
+            y = interval["read_count"]
+            max_y = max(max_y, y)
+            retention = object_retention_class(interval)
+            color = retention_class_color(retention)
+            ax.scatter(
+                x,
+                y,
+                s=35 + min(140, interval["size_bytes"] / 1024),
+                c=color,
+                alpha=0.65,
+                edgecolors="white",
+                linewidths=0.5,
+            )
+            if retention not in seen and Line2D is not None:
+                legend_items.append(
+                    Line2D(
+                        [0],
+                        [0],
+                        marker="o",
+                        color="none",
+                        markerfacecolor=color,
+                        markeredgecolor="white",
+                        markeredgewidth=0.5,
+                        markersize=7.5,
+                        label=retention,
+                    )
+                )
+                seen.add(retention)
+        ax.set_title(label_workload(workload), fontsize=11)
+        ax.set_xlabel("Lifetime (seconds)")
+        ax.grid(alpha=0.18)
+
+    axes[0].set_ylabel("Read events")
+    fig.suptitle(
+        "Object lifetime (seconds) vs reuse count with workflow-relative retention classes",
+        x=0.06,
+        ha="left",
+    )
+    if legend_items:
+        fig.legend(handles=legend_items, loc="upper right", bbox_to_anchor=(0.98, 0.95), frameon=False)
+    fig.text(
+        0.06,
+        0.01,
+        "Note: long-term retention after session end is not present in these single-run traces.",
+        fontsize=8.5,
+        color="#555",
+    )
+    fig.tight_layout(rect=(0, 0.03, 1.0, 0.93))
+    fig.savefig(out_path.with_suffix(".png"), dpi=180)
+    fig.savefig(out_path.with_suffix(".svg"))
+    plt.close(fig)
+
+
+def workload_lifetime_buckets(traces: list[tuple[Path, str, str, list[dict]]], out_path: Path) -> None:
+    if plt is None:
+        return
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    bucket_counts = defaultdict(lambda: {"short-term": 0, "medium-term": 0, "long-term": 0})
+    for _, workload, _, events in traces:
+        for interval in liveness_intervals(events):
+            bucket = object_retention_class(interval)
+            bucket_counts[workload][bucket] += 1
+
+    workloads = [workload for workload in DEFAULT_CONDITION if workload in bucket_counts]
+    if not workloads:
+        return
+
+    fig, ax = plt.subplots(figsize=(8.5, 5.0))
+    bottom = [0] * len(workloads)
+    xs = list(range(len(workloads)))
+    for retention_class in ["short-term", "medium-term", "long-term"]:
+        values = [bucket_counts[workload][retention_class] for workload in workloads]
+        ax.bar(
+            xs,
+            values,
+            bottom=bottom,
+            color=retention_class_color(retention_class),
+            edgecolor=retention_class_color(retention_class),
+            alpha=0.9,
+            label=retention_class,
+        )
+        bottom = [b + v for b, v in zip(bottom, values)]
+
+    ax.set_xticks(xs)
+    ax.set_xticklabels([label_workload(workload) for workload in workloads])
+    ax.set_xlabel("Workload")
+    ax.set_ylabel("Number of objects")
+    ax.set_title("Workflow retention classes by workload", loc="left")
+    ax.legend(title="Retention class")
+    ax.grid(axis="y", alpha=0.18)
+    duration_summary = step_duration_summary(traces)
+    fig.text(
+        0.06,
+        0.01,
+        format_step_duration_note(duration_summary),
+        fontsize=8.5,
+        color="#555",
+    )
+    fig.tight_layout(rect=(0, 0.03, 1, 0.95))
     fig.savefig(out_path.with_suffix(".png"), dpi=180)
     fig.savefig(out_path.with_suffix(".svg"))
     plt.close(fig)
@@ -863,8 +1105,8 @@ def main(argv: list[str]) -> int:
         out_path=fig_dir / "duplication_factor",
         title="Text/token duplication factor by workload",
         x_label="text/token duplication factor",
+        value_format=".2f",
     )
-    scatter_lifetime_reuse(traces, fig_dir / "lifetime_reuse")
     if search_rows:
         search_funnel_figure(search_rows, fig_dir / "search_prompt_pollution")
     if prompt_cache_rows:
@@ -887,6 +1129,10 @@ def main(argv: list[str]) -> int:
                    out_path=fig_dir / "compaction_raw_context_byte_steps",
                    title="Compaction raw-context byte-steps by condition",
                    x_label="byte-steps")
+    scatter_lifetime_reuse(traces, fig_dir / "lifetime_reuse")
+    lifetime_reuse_seconds(traces, fig_dir / "lifetime_reuse_seconds")
+    workload_lifetime_buckets(traces, fig_dir / "lifetime_buckets_by_workload")
+    step_duration_figure(traces, fig_dir / "step_duration_by_workload")
     print(f"Wrote CSVs to {out_dir}")
     if plt is None:
         print("Skipped figures because matplotlib is not installed")
