@@ -58,7 +58,14 @@ Putting it on the persistent volume means re-launching the pod doesn't re-downlo
 
 ---
 
-## 5. Launch vLLM (foreground, in tmux)
+## 5. Launch vLLM (foreground, in tmux) — OPTIONAL smoke-test server
+
+> **Scope note.** This HTTP server (`serving/launch_vllm.sh`, `vllm serve`,
+> `max-model-len 16384`) is only an interactive sanity check for steps 6-7.
+> The final-v3 artifact does **not** use it: `agent/run_final_v3.py` loads the
+> model **in-process** via `vllm.LLM` (`MAX_MODEL_LEN = 8192`) and reads
+> cached-token counts directly off each `RequestOutput.num_cached_tokens`. You
+> can skip steps 5-7 entirely and still collect the six final-v3 traces.
 
 ```bash
 tmux new -s vllm
@@ -96,7 +103,10 @@ curl -s http://localhost:8000/metrics | grep -E "vllm:(gpu_cache|prefix_cache|nu
 **Expected:** Prometheus-format metrics including `vllm:gpu_cache_usage_perc`,
 `vllm:prefix_cache_queries`, `vllm:prefix_cache_hits`, `vllm:num_requests_*`.
 
-These are what the engine-layer telemetry scrapes.
+This `/metrics` curl is a manual sanity check only. The project does **not**
+scrape this endpoint: `serving/telemetry.py` samples GPU/host memory via
+NVML + psutil + `torch.cuda`, and the final-v3 cached-token signal comes from
+the in-process `RequestOutput.num_cached_tokens` counter (not `/metrics`).
 
 ---
 
