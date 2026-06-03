@@ -1,0 +1,16 @@
+row_kind,label,value_ms,note
+phase,prompt_build_s1,297.51,
+phase,vllm_generate_s1,3439.91,
+phase,prompt_build_s2,73.1,
+phase,vllm_generate_s2,2921.93,
+phase,prompt_build_s3,39.77,
+phase,vllm_generate_s3,2925.02,
+phase,prompt_build_s4,68.8,
+phase,vllm_generate_s4,2869.31,
+phase,prompt_build_s5,88.83,
+phase,vllm_generate_s5,2781.73,
+kernel_class,GEMM / matmul,1011.42,7986 kernels
+kernel_class,elementwise / SwiGLU,99.33,12222 kernels
+kernel_class,norm / RMSNorm,33.42,4047 kernels
+kernel_class,other,29.9,4372 kernels
+memcpy,h2d_d2h_total,32597.3,"909 ops, 15.35 GB"
