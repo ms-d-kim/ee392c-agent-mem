@@ -267,14 +267,6 @@ contiguous leading spans. This is a cached-token availability and
 count-reconciliation check, not independent semantic-attribution ground truth.
 Actual physical HBM residency is not claimed.
 
-## Key dates
-
-| Milestone          | Date           |
-| ------------------ | -------------- |
-| Lightning pitch    | May 13, 2026 (done) |
-| Final presentation | June 1–3, 2026 |
-| Final report       | June 8, 2026   |
-
 ## Anchor papers
 
 - **GainSight** (arXiv 2504.14866) — methodology anchor for data-lifetime
