@@ -89,8 +89,8 @@ CONDITION_LABELS = {
 }
 
 RETENTION_CLASS_COLORS = {
-    "short-term": "#A7D8C8",
-    "medium-term": "#6FB39A",
+    "short-term": "#4A7EBB",
+    "medium-term": "#E67A2C",
     "long-term": "#2C7A62",
 }
 
@@ -708,25 +708,22 @@ def search_funnel_figure(rows: list[dict], out_path: Path) -> None:
     ax.bar([i + width / 2 for i in x], inserted, width=width, label="inserted", color=COLORS["retrieved_snippet"])
     ax.set_xticks(list(x), labels)
     ax.set_ylabel("bytes")
-    # Title sits high (pad) so the scan caption can tuck just beneath it
-    # without the two overlapping.
-    ax.set_title("Search prompt pollution by condition", loc="left", pad=26, fontsize=12)
+    ax.set_title("Search prompt pollution by condition", loc="left")
     unique_scanned = sorted({int(value) for value in scanned})
     if len(unique_scanned) == 1:
         ax.text(
             0.0,
-            1.015,
+            1.02,
             f"Both traces scan {compact_number(unique_scanned[0])}B; difference is returned/inserted prompt history.",
             transform=ax.transAxes,
             fontsize=8.5,
             color="#555555",
             va="bottom",
-            ha="left",
         )
     ax.legend(frameon=False)
     fig.tight_layout()
-    fig.savefig(out_path.with_suffix(".png"), dpi=180, bbox_inches="tight")
-    fig.savefig(out_path.with_suffix(".svg"), bbox_inches="tight")
+    fig.savefig(out_path.with_suffix(".png"), dpi=180)
+    fig.savefig(out_path.with_suffix(".svg"))
     plt.close(fig)
 
 
@@ -768,7 +765,7 @@ def step_duration_figure(traces: list[tuple[Path, str, str, list[dict]]], out_pa
     medians = [summary[workload]["median"] for workload in workloads]
     widths = [maxs[i] - mins[i] for i in y]
     fig, ax = plt.subplots(figsize=(8.5, 4.0))
-    ax.barh(y, widths, left=mins, height=0.6, color="#76B7B2", alpha=0.75)
+    ax.barh(y, widths, left=mins, height=0.6, color=RETENTION_CLASS_COLORS["short-term"], alpha=0.75)
     ax.scatter(medians, y, marker="o", color="#222222", zorder=3, label="median")
     ax.set_yticks(y, [label_workload(workload) for workload in workloads])
     ax.set_xlabel("Single-step duration (seconds)")
@@ -784,6 +781,438 @@ def step_duration_figure(traces: list[tuple[Path, str, str, list[dict]]], out_pa
         color="#555",
     )
     fig.tight_layout()
+    fig.savefig(out_path.with_suffix(".png"), dpi=180)
+    fig.savefig(out_path.with_suffix(".svg"))
+    plt.close(fig)
+
+
+def tier_assignment(sem: str, byte_seconds: float, reuse_count: int) -> str:
+    """Assign tier based on paper's empirical observations."""
+    if sem in {"plan_state", "system_prompt", "compacted_summary"}:
+        return "T1"
+    if sem in {"assistant_history"}:
+        return "T2"
+    if sem in {"raw_context", "search_result", "retrieved_snippet", "search_corpus_scan"}:
+        return "T3"
+    if byte_seconds > 1e8 or sem in {"user_problem", "prompt_template"}:
+        return "T2"
+    return "T1"
+
+
+def tier_assignment_by_byte_seconds(byte_seconds: float) -> str:
+    """Assign tier purely based on byte-seconds thresholds."""
+    if byte_seconds < 100e6:  # < 100M
+        return "T1"
+    elif byte_seconds < 1e9:  # < 1B
+        return "T2"
+    else:
+        return "T3"
+
+
+def tier_color(tier: str) -> str:
+    """Color tier 1 as fast (green), tier 2 as bandwidth (orange), tier 3 as capacity (red)."""
+    tier_colors = {
+        "T1": "#2E7D32",  # green
+        "T2": "#F57C00",  # orange
+        "T3": "#C62828",  # red
+    }
+    return tier_colors.get(tier, "#888888")
+
+
+def capacity_reuse_scatter(traces: list[tuple[Path, str, str, list[dict]]], out_path: Path) -> None:
+    if plt is None:
+        return
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    default_traces = [
+        (workload, condition, events)
+        for _, workload, condition, events in traces
+        if DEFAULT_CONDITION.get(workload) == condition
+    ]
+    if not default_traces:
+        return
+    
+    fig, ax = plt.subplots(figsize=(10.5, 6.5))
+    
+    all_byte_seconds = []
+    all_reuse = []
+    all_colors = []
+    all_sizes = []
+    all_labels = []
+    all_tiers = set()
+    
+    for workload, _, events in default_traces:
+        intervals = liveness_intervals(events)
+        by_sem = defaultdict(lambda: {"byte_seconds": 0.0, "reuse": 0, "size_bytes": 0, "count": 0})
+        for interval in intervals:
+            sem = interval["semantic_type"]
+            by_sem[sem]["byte_seconds"] += interval["size_bytes"] * interval["lifetime_s"]
+            by_sem[sem]["size_bytes"] += interval["size_bytes"]
+            by_sem[sem]["count"] += 1
+        
+        for event in events:
+            if event["op"] == "read" and not is_bookkeeping_event(event):
+                sem = semantic(event)
+                if sem in by_sem:
+                    by_sem[sem]["reuse"] += 1
+        
+        max_size_in_trace = max((data["size_bytes"] for data in by_sem.values()), default=1)
+        for sem, data in by_sem.items():
+            byte_seconds = data["byte_seconds"]
+            reuse = data["reuse"]
+            if byte_seconds > 0:
+                tier = tier_assignment(sem, byte_seconds, reuse)
+                all_byte_seconds.append(byte_seconds)
+                all_reuse.append(reuse)
+                all_colors.append(tier_color(tier))
+                size_normalized = data["size_bytes"] / max_size_in_trace
+                bubble_size = 100 + size_normalized * 250  # range 100-350
+                all_sizes.append(bubble_size)
+                all_labels.append((label_semantic(sem), byte_seconds, reuse))
+                all_tiers.add(tier)
+    
+    scatter = ax.scatter(
+        all_byte_seconds, all_reuse,
+        c=all_colors, s=all_sizes,
+        alpha=0.65, edgecolors="white", linewidths=1.2
+    )
+    
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel("Capacity-time: size × lifetime (byte-seconds, log scale)", fontsize=11)
+    ax.set_ylabel("Reuse: logical read events (log scale)", fontsize=11)
+    ax.set_title("Decoupling of capacity-time and reuse: joint (size×lifetime, reuse) tier mapping", loc="left", fontsize=12, fontweight="bold")
+    ax.grid(True, alpha=0.2, which="both", linestyle="--")
+    
+    # Legend: tiers + size explanation
+    legend_items = []
+    if Line2D is not None:
+        for tier_label in ["T1 (Resident)", "T2 (Bandwidth)", "T3 (Capacity)"]:
+            tier = tier_label.split()[0]
+            legend_items.append(
+                Line2D([0], [0], marker="o", color="none", markerfacecolor=tier_color(tier),
+                       markeredgecolor="white", markeredgewidth=1.2, markersize=10,
+                       label=tier_label)
+            )
+        # Add size legend
+        legend_items.append(Line2D([0], [0], marker="o", color="none", markerfacecolor="#999",
+                                   markeredgecolor="white", markeredgewidth=1, markersize=7,
+                                   label="Small object"))
+        legend_items.append(Line2D([0], [0], marker="o", color="none", markerfacecolor="#999",
+                                   markeredgecolor="white", markeredgewidth=1, markersize=14,
+                                   label="Large object"))
+        ax.legend(handles=legend_items, loc="upper left", frameon=True, fancybox=True, shadow=True, fontsize=9.5)
+    
+    fig.text(0.02, 0.01, 
+             "Bubble size ∝ max object size in semantic class. "
+             "Key insight: raw_context vs assistant_history both have ~30 reads but differ 4.6× in capacity-time, "
+             "showing (size×lifetime, reuse) decoupling.",
+             fontsize=8.0, color="#555", wrap=True)
+    fig.tight_layout(rect=(0, 0.05, 1, 0.95))
+    fig.savefig(out_path.with_suffix(".png"), dpi=180, bbox_inches="tight")
+    fig.savefig(out_path.with_suffix(".svg"), bbox_inches="tight")
+    plt.close(fig)
+
+
+def capacity_reuse_scatter_byteseconds_tiers(traces: list[tuple[Path, str, str, list[dict]]], out_path: Path) -> None:
+    """Capacity-reuse scatter using data-driven byte-seconds thresholds for tier assignment."""
+    if plt is None:
+        return
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    default_traces = [
+        (workload, condition, events)
+        for _, workload, condition, events in traces
+        if DEFAULT_CONDITION.get(workload) == condition
+    ]
+    if not default_traces:
+        return
+    
+    fig, ax = plt.subplots(figsize=(10.5, 6.5))
+    
+    all_byte_seconds = []
+    all_reuse = []
+    all_colors = []
+    all_sizes = []
+    all_labels = []
+    all_tiers = set()
+    
+    for workload, _, events in default_traces:
+        intervals = liveness_intervals(events)
+        by_sem = defaultdict(lambda: {"byte_seconds": 0.0, "reuse": 0, "size_bytes": 0, "count": 0})
+        for interval in intervals:
+            sem = interval["semantic_type"]
+            by_sem[sem]["byte_seconds"] += interval["size_bytes"] * interval["lifetime_s"]
+            by_sem[sem]["size_bytes"] += interval["size_bytes"]
+            by_sem[sem]["count"] += 1
+        
+        for event in events:
+            if event["op"] == "read" and not is_bookkeeping_event(event):
+                sem = semantic(event)
+                if sem in by_sem:
+                    by_sem[sem]["reuse"] += 1
+        
+        max_size_in_trace = max((data["size_bytes"] for data in by_sem.values()), default=1)
+        for sem, data in by_sem.items():
+            byte_seconds = data["byte_seconds"]
+            reuse = data["reuse"]
+            if byte_seconds > 0:
+                tier = tier_assignment_by_byte_seconds(byte_seconds)
+                all_byte_seconds.append(byte_seconds)
+                all_reuse.append(reuse)
+                all_colors.append(tier_color(tier))
+                size_normalized = data["size_bytes"] / max_size_in_trace
+                bubble_size = 100 + size_normalized * 250  # range 100-350
+                all_sizes.append(bubble_size)
+                all_labels.append((label_semantic(sem), byte_seconds, reuse))
+                all_tiers.add(tier)
+    
+    scatter = ax.scatter(
+        all_byte_seconds, all_reuse,
+        c=all_colors, s=all_sizes,
+        alpha=0.65, edgecolors="white", linewidths=1.2
+    )
+    
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel("Capacity-time: size × lifetime (byte-seconds, log scale)", fontsize=11)
+    ax.set_ylabel("Reuse: logical read events (log scale)", fontsize=11)
+    ax.set_title("Data-driven tier assignment: byte-seconds thresholds (T1 <100M, T2 100M–1B, T3 >1B)", loc="left", fontsize=12, fontweight="bold")
+    ax.grid(True, alpha=0.2, which="both", linestyle="--")
+    
+    # Legend: tiers + size explanation
+    legend_items = []
+    if Line2D is not None:
+        for tier_label in ["T1 (Resident)", "T2 (Bandwidth)", "T3 (Capacity)"]:
+            tier = tier_label.split()[0]
+            legend_items.append(
+                Line2D([0], [0], marker="o", color="none", markerfacecolor=tier_color(tier),
+                       markeredgecolor="white", markeredgewidth=1.2, markersize=10,
+                       label=tier_label)
+            )
+        # Add size legend
+        legend_items.append(Line2D([0], [0], marker="o", color="none", markerfacecolor="#999",
+                                   markeredgecolor="white", markeredgewidth=1, markersize=7,
+                                   label="Small object"))
+        legend_items.append(Line2D([0], [0], marker="o", color="none", markerfacecolor="#999",
+                                   markeredgecolor="white", markeredgewidth=1, markersize=14,
+                                   label="Large object"))
+        ax.legend(handles=legend_items, loc="upper left", frameon=True, fancybox=True, shadow=True, fontsize=9.5)
+    
+    fig.text(0.02, 0.01, 
+             "Bubble size ∝ max object size in semantic class. "
+             "Tiers assigned by byte-seconds: <100M → T1, 100M–1B → T2, >1B → T3. "
+             "Boundary effects show semantic-class homogeneity vs. byte-seconds clustering.",
+             fontsize=8.0, color="#555", wrap=True)
+    fig.tight_layout(rect=(0, 0.05, 1, 0.95))
+    fig.savefig(out_path.with_suffix(".png"), dpi=180, bbox_inches="tight")
+    fig.savefig(out_path.with_suffix(".svg"), bbox_inches="tight")
+    plt.close(fig)
+
+
+def capacity_reuse_tier_comparison(traces: list[tuple[Path, str, str, list[dict]]], out_path: Path) -> None:
+    """Side-by-side comparison: semantic-class tiers (left) vs. byte-seconds tiers (right)."""
+    if plt is None:
+        return
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    default_traces = [
+        (workload, condition, events)
+        for _, workload, condition, events in traces
+        if DEFAULT_CONDITION.get(workload) == condition
+    ]
+    if not default_traces:
+        return
+    
+    fig, (ax_left, ax_right) = plt.subplots(1, 2, figsize=(15, 6))
+    
+    all_byte_seconds = []
+    all_reuse = []
+    all_sizes = []
+    all_labels = []
+    
+    for workload, _, events in default_traces:
+        intervals = liveness_intervals(events)
+        by_sem = defaultdict(lambda: {"byte_seconds": 0.0, "reuse": 0, "size_bytes": 0, "count": 0})
+        for interval in intervals:
+            sem = interval["semantic_type"]
+            by_sem[sem]["byte_seconds"] += interval["size_bytes"] * interval["lifetime_s"]
+            by_sem[sem]["size_bytes"] += interval["size_bytes"]
+            by_sem[sem]["count"] += 1
+        
+        for event in events:
+            if event["op"] == "read" and not is_bookkeeping_event(event):
+                sem = semantic(event)
+                if sem in by_sem:
+                    by_sem[sem]["reuse"] += 1
+        
+        max_size_in_trace = max((data["size_bytes"] for data in by_sem.values()), default=1)
+        for sem, data in by_sem.items():
+            byte_seconds = data["byte_seconds"]
+            reuse = data["reuse"]
+            if byte_seconds > 0:
+                all_byte_seconds.append(byte_seconds)
+                all_reuse.append(reuse)
+                size_normalized = data["size_bytes"] / max_size_in_trace
+                bubble_size = 100 + size_normalized * 250  # range 100-350
+                all_sizes.append(bubble_size)
+                all_labels.append((label_semantic(sem), byte_seconds, reuse))
+    
+    # Left: semantic class tiers
+    colors_semantic = [tier_color(tier_assignment(all_labels[i][0], all_byte_seconds[i], all_reuse[i])) 
+                       for i in range(len(all_byte_seconds))]
+    ax_left.scatter(all_byte_seconds, all_reuse, c=colors_semantic, s=all_sizes, alpha=0.65, 
+                    edgecolors="white", linewidths=1.2)
+    ax_left.set_xscale("log")
+    ax_left.set_yscale("log")
+    ax_left.set_xlabel("Capacity-time (byte-seconds, log scale)", fontsize=10)
+    ax_left.set_ylabel("Reuse (logical reads, log scale)", fontsize=10)
+    ax_left.set_title("Semantic-class assignment (low overhead)", fontsize=11, fontweight="bold")
+    ax_left.grid(True, alpha=0.2, which="both", linestyle="--")
+    
+    # Right: byte-seconds thresholds
+    colors_bytes = [tier_color(tier_assignment_by_byte_seconds(b)) for b in all_byte_seconds]
+    ax_right.scatter(all_byte_seconds, all_reuse, c=colors_bytes, s=all_sizes, alpha=0.65, 
+                     edgecolors="white", linewidths=1.2)
+    ax_right.set_xscale("log")
+    ax_right.set_yscale("log")
+    ax_right.set_xlabel("Capacity-time (byte-seconds, log scale)", fontsize=10)
+    ax_right.set_ylabel("Reuse (logical reads, log scale)", fontsize=10)
+    ax_right.set_title("Byte-seconds thresholds (<100M, 100M–1B, >1B)", fontsize=11, fontweight="bold")
+    ax_right.grid(True, alpha=0.2, which="both", linestyle="--")
+    
+    # Shared legend
+    legend_items = []
+    if Line2D is not None:
+        for tier_label in ["T1 (Resident)", "T2 (Bandwidth)", "T3 (Capacity)"]:
+            tier = tier_label.split()[0]
+            legend_items.append(
+                Line2D([0], [0], marker="o", color="none", markerfacecolor=tier_color(tier),
+                       markeredgecolor="white", markeredgewidth=1.2, markersize=10,
+                       label=tier_label)
+            )
+        legend_items.append(Line2D([0], [0], marker="o", color="none", markerfacecolor="#999",
+                                   markeredgecolor="white", markeredgewidth=1, markersize=7,
+                                   label="Small"))
+        legend_items.append(Line2D([0], [0], marker="o", color="none", markerfacecolor="#999",
+                                   markeredgecolor="white", markeredgewidth=1, markersize=14,
+                                   label="Large"))
+        fig.legend(handles=legend_items, loc="lower center", ncol=6, frameon=True, 
+                   fancybox=True, shadow=True, fontsize=9.5, bbox_to_anchor=(0.5, -0.05))
+    
+    fig.suptitle("Tier assignment strategies: semantic domain knowledge vs. data-driven byte-seconds", 
+                 fontsize=12, fontweight="bold", y=0.98)
+    fig.text(0.5, 0.02, 
+             "Left: semantic-class hardcoding (used in paper, zero profiling overhead). "
+             "Right: data-driven byte-seconds thresholds (generalizable, requires full-trace profiling). "
+             "Bubble size ∝ max object size per semantic class.",
+             fontsize=8.5, color="#555", ha="center", wrap=True)
+    fig.tight_layout(rect=(0, 0.08, 1, 0.96))
+    fig.savefig(out_path.with_suffix(".png"), dpi=180, bbox_inches="tight")
+    fig.savefig(out_path.with_suffix(".svg"), bbox_inches="tight")
+    plt.close(fig)
+
+
+def lifetime_range_by_workload(traces: list[tuple[Path, str, str, list[dict]]], out_path: Path) -> None:
+    if plt is None:
+        return
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    default_traces = [
+        (workload, condition, events)
+        for _, workload, condition, events in traces
+        if DEFAULT_CONDITION.get(workload) == condition
+    ]
+    if not default_traces:
+        return
+
+    workloads = [workload for workload in DEFAULT_CONDITION if any(w == workload for w, _, _ in default_traces)]
+    stats_by_workload: dict[str, dict[str, dict[str, float] | None]] = {}
+    dominance_notes: list[str] = []
+
+    for workload, _, events in default_traces:
+        intervals = liveness_intervals(events)
+        by_retention = {
+            "short-term": [interval["lifetime_s"] for interval in intervals if object_retention_class(interval) == "short-term"],
+            "medium-term": [interval["lifetime_s"] for interval in intervals if object_retention_class(interval) == "medium-term"],
+        }
+        stats: dict[str, dict[str, float] | None] = {}
+        for retention_class, values in by_retention.items():
+            if values:
+                stats[retention_class] = {
+                    "min": min(values),
+                    "median": statistics.median(values),
+                    "max": max(values),
+                }
+            else:
+                stats[retention_class] = None
+        short_intervals = [interval for interval in intervals if object_retention_class(interval) == "short-term"]
+        if short_intervals:
+            semantic_counts: dict[str, int] = defaultdict(int)
+            kv_count = 0
+            for interval in short_intervals:
+                semantic_counts[interval["semantic_type"]] += 1
+                if interval.get("repr_type") == "kv_estimated":
+                    kv_count += 1
+            top_semantic, top_count = max(semantic_counts.items(), key=lambda pair: pair[1])
+            short_pct = 100.0 * top_count / len(short_intervals)
+            kv_pct = 100.0 * kv_count / len(short_intervals)
+            note = f"{label_workload(workload)} short-term dominated by {label_semantic(top_semantic)} ({short_pct:.0f}%)"
+            if kv_count:
+                note += f", {kv_pct:.0f}% KV-estimated"
+            dominance_notes.append(note)
+        else:
+            dominance_notes.append(f"{label_workload(workload)} has no short-term objects")
+        stats_by_workload[workload] = stats
+
+    y_positions: list[float] = []
+    y_labels: list[str] = []
+    lefts: list[float] = []
+    widths: list[float] = []
+    medians: list[float | None] = []
+    colors: list[str] = []
+    for idx, workload in enumerate(workloads):
+        stats = stats_by_workload.get(workload, {})
+        for offset, retention_class in enumerate(["short-term", "medium-term"]):
+            y = idx * 3 + offset
+            y_positions.append(y)
+            y_labels.append(f"{label_workload(workload)} {retention_class}")
+            stat = stats.get(retention_class)
+            if stat:
+                lefts.append(stat["min"])
+                widths.append(stat["max"] - stat["min"])
+                medians.append(stat["median"])
+            else:
+                lefts.append(0.0)
+                widths.append(0.0)
+                medians.append(None)
+            colors.append(RETENTION_CLASS_COLORS[retention_class])
+
+    fig, ax = plt.subplots(figsize=(9.0, 4.8))
+    bar = ax.barh(y_positions, widths, left=lefts, height=0.6, color=colors, alpha=0.75)
+    for pos, median in zip(y_positions, medians):
+        if median is not None:
+            ax.scatter(median, pos, marker="o", color="#222222", zorder=3, s=30)
+
+    ax.set_yticks(y_positions)
+    ax.set_yticklabels(y_labels)
+    ax.set_xlabel("Lifetime (seconds)")
+    ax.set_title("Short- and medium-term lifetime ranges by default workload", loc="left")
+    ax.grid(axis="x", alpha=0.18)
+    legend_items = []
+    if Line2D is not None:
+        for retention_class in ["short-term", "medium-term"]:
+            legend_items.append(
+                Line2D(
+                    [0], [0], marker="s", color=RETENTION_CLASS_COLORS[retention_class], markersize=8,
+                    linestyle="", label=retention_class,
+                )
+            )
+        legend_items.append(Line2D([0], [0], marker="o", color="#222222", markersize=6, linestyle="", label="median"))
+        ax.legend(handles=legend_items, frameon=False)
+
+    note_text = "Short-term dominance: " + "; ".join(dominance_notes) + "."
+    fig.text(0.02, 0.02, note_text, fontsize=8.5, color="#555")
+    fig.tight_layout(rect=(0, 0.05, 1, 0.95))
     fig.savefig(out_path.with_suffix(".png"), dpi=180)
     fig.savefig(out_path.with_suffix(".svg"))
     plt.close(fig)
@@ -1374,11 +1803,14 @@ def main(argv: list[str]) -> int:
                    x_label="byte-steps")
     scatter_lifetime_reuse(traces, fig_dir / "lifetime_reuse")
     lifetime_reuse_seconds(traces, fig_dir / "lifetime_reuse_seconds")
+    capacity_reuse_scatter(traces, fig_dir / "capacity_reuse_tier_mapping")
+    capacity_reuse_scatter_byteseconds_tiers(traces, fig_dir / "capacity_reuse_byteseconds_tiers")
     workload_lifetime_buckets(traces, fig_dir / "lifetime_buckets_by_workload")
     workload_retention_composition(traces, fig_dir / "workload_retention_composition")
     semantic_retention_by_class(traces, fig_dir / "semantic_retention_by_class")
     reuse_interval_by_workload(traces, fig_dir / "reuse_interval_by_workload")
     step_duration_figure(traces, fig_dir / "step_duration_by_workload")
+    lifetime_range_by_workload(traces, fig_dir / "lifetime_ranges_by_workload")
     print(f"Wrote CSVs to {out_dir}")
     if plt is None:
         print("Skipped figures because matplotlib is not installed")
