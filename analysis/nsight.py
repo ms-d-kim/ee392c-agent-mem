@@ -190,13 +190,19 @@ def figure(phases: list[dict], classes: dict, memcpy: dict, out_path: Path) -> N
     ax_kc.tick_params(axis="x", labelsize=8.5, rotation=12)
     ax_kc.margins(y=0.20)
 
-    # --- Panel C: HBM memcpy volume + caveat ---
+    # --- Panel C: CUDA memcpy volume + caveat ---
     ax_mc.axis("off")
     lines = [
-        "H→D / D→H memcpy (full profile)",
+        "All CUDA memcpy (full profile)",
         "",
         f"   {memcpy['n_memcpys']:>5,} ops",
         f"   {memcpy['total_bytes']/1e9:>5.2f} GB   ({memcpy['total_ms']:.0f} ms)",
+        "",
+        "Volume is dominated by the one-",
+        "time model-weight upload before",
+        "step 1; ms sums overlapping async",
+        "copies, so it can exceed the",
+        "profile span.",
         "",
         "Caveat — kernel-level capture is",
         "buffer-truncated at step 1; NVTX",

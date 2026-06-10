@@ -477,9 +477,12 @@ def main(argv: list[str]) -> int:
 
     if args.style == "clean":
         render_clean(args.out)
+        print(f"Wrote {args.out}.png/.svg")
     else:
+        # The detailed renderer is a placeholder stub and saves PNG only
+        # (see the note inside render_detailed).
         render_detailed(args.out)
-    print(f"Wrote {args.out}.png/.svg")
+        print(f"Wrote {args.out}.png")
     return 0
 
 

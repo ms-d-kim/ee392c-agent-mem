@@ -1,7 +1,11 @@
 """Analyze final-v3 semantic traces and generate artifact CSVs/figures.
 
-Read counts are logical prompt-construction accesses, not hardware memory
-transactions. KV byte counts are analytical projections, not physical residency.
+Read counts are logical access events, not hardware memory transactions.
+``logical_read_events`` totals two distinct populations, reported separately as
+``prompt_construction_reads`` (text/token re-reads while assembling each
+prompt) and ``cached_prefix_kv_reads`` (engine-reported cached-prefix KV reuse,
+emitted only when prefix caching is on — so the total is cache-condition-
+dependent). KV byte counts are analytical projections, not physical residency.
 """
 
 from __future__ import annotations
@@ -306,6 +310,11 @@ def step_duration_summary(traces: list[tuple[Path, str, str, list[dict]]]) -> di
         for event in events:
             if "step" not in event or "ts" not in event:
                 continue
+            # Step 0 is task_setup bookkeeping (fixture load, metadata), not a
+            # generation step; including it makes the per-workload minimum a
+            # setup span rather than a step duration.
+            if event["step"] == 0:
+                continue
             by_step[event["step"]].append(float(event["ts"]))
         for ts_list in by_step.values():
             if ts_list:
@@ -354,12 +363,18 @@ def semantic_summary(traces: list[tuple[Path, str, str, list[dict]]]) -> list[di
     for path, workload, condition, events in traces:
         intervals = liveness_intervals(events)
         reads = defaultdict(int)
+        prompt_reads = defaultdict(int)
+        kv_reads = defaultdict(int)
         mutates = defaultdict(int)
         for event in events:
             if not is_live_object_event(event):
                 continue
             if event["op"] == "read":
                 reads[semantic(event)] += 1
+                if event.get("repr_type") == "kv_estimated":
+                    kv_reads[semantic(event)] += 1
+                else:
+                    prompt_reads[semantic(event)] += 1
             elif event["op"] == "mutate":
                 mutates[semantic(event)] += 1
         agg = defaultdict(lambda: {
@@ -368,6 +383,8 @@ def semantic_summary(traces: list[tuple[Path, str, str, list[dict]]]) -> list[di
             "n_objects": 0,
             "logical_ids": set(),
             "reads": 0,
+            "prompt_reads": 0,
+            "kv_reads": 0,
             "mutates": 0,
             "max_lifetime_steps": 0,
         })
@@ -383,6 +400,10 @@ def semantic_summary(traces: list[tuple[Path, str, str, list[dict]]]) -> list[di
             )
         for sem, count in reads.items():
             agg[sem]["reads"] = count
+        for sem, count in prompt_reads.items():
+            agg[sem]["prompt_reads"] = count
+        for sem, count in kv_reads.items():
+            agg[sem]["kv_reads"] = count
         for sem, count in mutates.items():
             agg[sem]["mutates"] = count
         for sem, data in sorted(agg.items()):
@@ -397,6 +418,8 @@ def semantic_summary(traces: list[tuple[Path, str, str, list[dict]]]) -> list[di
                 "byte_steps": data["byte_steps"],
                 "max_lifetime_steps": data["max_lifetime_steps"],
                 "logical_read_events": data["reads"],
+                "prompt_construction_reads": data["prompt_reads"],
+                "cached_prefix_kv_reads": data["kv_reads"],
                 "mutate_events": data["mutates"],
             })
     return rows
@@ -596,6 +619,7 @@ def bar_figure(
     title: str,
     x_label: str | None = None,
     value_format: str | None = None,
+    note: str | None = None,
 ) -> None:
     if plt is None:
         return
@@ -627,7 +651,11 @@ def bar_figure(
         label = format(value, value_format) if value_format else compact_number(value)
         ax.text(value + right * 0.015, idx, label, va="center", fontsize=8.5, color="#555")
     ax.set_xlim(0, right * 1.18 if right > 0 else 1)
-    fig.tight_layout()
+    if note:
+        fig.text(0.02, 0.01, note, fontsize=8.5, color="#555")
+        fig.tight_layout(rect=(0, 0.04, 1, 1))
+    else:
+        fig.tight_layout()
     fig.savefig(out_path.with_suffix(".png"), dpi=180)
     fig.savefig(out_path.with_suffix(".svg"))
     plt.close(fig)
@@ -1465,7 +1493,9 @@ def workload_lifetime_buckets(traces: list[tuple[Path, str, str, list[dict]]], o
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     bucket_counts = defaultdict(lambda: {"short-term": 0, "medium-term": 0, "long-term": 0})
-    for _, workload, _, events in traces:
+    for _, workload, condition, events in traces:
+        if DEFAULT_CONDITION.get(workload) != condition:
+            continue
         for interval in liveness_intervals(events):
             bucket = object_retention_class(interval)
             bucket_counts[workload][bucket] += 1
@@ -1479,6 +1509,10 @@ def workload_lifetime_buckets(traces: list[tuple[Path, str, str, list[dict]]], o
     xs = list(range(len(workloads)))
     for retention_class in ["short-term", "medium-term", "long-term"]:
         values = [bucket_counts[workload][retention_class] for workload in workloads]
+        if not any(values):
+            # long-term never occurs in single-run traces; drawing a
+            # zero-height bar adds a misleading legend entry and edge sliver.
+            continue
         ax.bar(
             xs,
             values,
@@ -1494,7 +1528,7 @@ def workload_lifetime_buckets(traces: list[tuple[Path, str, str, list[dict]]], o
     ax.set_xticklabels([label_workload(workload) for workload in workloads])
     ax.set_xlabel("Workload")
     ax.set_ylabel("Number of objects")
-    ax.set_title("Workflow retention classes by workload", loc="left")
+    ax.set_title("Workflow retention classes by workload (default traces)", loc="left")
     ax.legend(title="Retention class")
     ax.grid(axis="y", alpha=0.18)
     duration_summary = step_duration_summary(traces)
@@ -1517,7 +1551,9 @@ def workload_retention_composition(traces: list[tuple[Path, str, str, list[dict]
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     bucket_counts = defaultdict(lambda: {"short-term": 0, "medium-term": 0, "long-term": 0})
-    for _, workload, _, events in traces:
+    for _, workload, condition, events in traces:
+        if DEFAULT_CONDITION.get(workload) != condition:
+            continue
         for interval in liveness_intervals(events):
             bucket = object_retention_class(interval)
             bucket_counts[workload][bucket] += 1
@@ -1548,7 +1584,7 @@ def workload_retention_composition(traces: list[tuple[Path, str, str, list[dict]
     ax.set_xticklabels([label_workload(workload) for workload in workloads])
     ax.set_ylabel("Percent of objects")
     ax.set_xlabel("Workload")
-    ax.set_title("Retention-class composition by workload", loc="left")
+    ax.set_title("Retention-class composition by workload (default traces)", loc="left")
     ax.set_ylim(0, 100)
     ax.grid(axis="y", alpha=0.18)
     ax.legend(title="Retention class")
@@ -1692,7 +1728,8 @@ def main(argv: list[str]) -> int:
     write_csv(out_dir / "semantic_summary.csv", semantic_rows, [
         "trace", "workload", "condition", "semantic_type", "n_objects",
         "n_logical_objects", "byte_seconds", "byte_steps", "max_lifetime_steps",
-        "logical_read_events", "mutate_events",
+        "logical_read_events", "prompt_construction_reads",
+        "cached_prefix_kv_reads", "mutate_events",
     ])
     write_csv(out_dir / "kv_pressure.csv", kv_rows, [
         "trace", "workload", "condition", "semantic_type",
@@ -1778,6 +1815,11 @@ def main(argv: list[str]) -> int:
         title="Text/token duplication factor by workload",
         x_label="text/token duplication factor",
         value_format=".2f",
+        note=(
+            "Floor of ~2 is an instrumentation invariant: the runner always emits "
+            "coexisting text + token snapshots per message. Deviation from 2 tracks "
+            "tokenizer byte density, not workload memory behavior."
+        ),
     )
     if search_rows:
         search_funnel_figure(search_rows, fig_dir / "search_prompt_pollution")

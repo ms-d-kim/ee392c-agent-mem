@@ -15,6 +15,11 @@ set: the topmost (origin == k) slice is genuinely new prefill work; everything
 below it is carry-over that a tiered memory system could resolve from a
 cached/cheaper tier.
 
+The decomposition is computed purely from logical KV re-projections and never
+reads the engine's cached-token counters, so it is independent of the prefix-
+cache condition by construction: the coding cache-on and cache-off panels
+differ only through sampled generation text, not through caching itself.
+
 Run:
     python3 -m analysis.carryover traces/final_v3
 """
@@ -73,12 +78,26 @@ TITLES = {
     ("compaction_agent", "compaction_off"): "compaction · off",
 }
 
-# Sequential ramp indexed by origin step 0..5 (0 = initial system+problem prompt).
+# Sequential ramp indexed by origin step. The earliest observed origin is
+# step 1 (the first generate step prefills the initial system+problem prompt);
+# step 0 is task_setup bookkeeping and never projects KV.
 ORIGIN_COLORS = ["#08306B", "#2171B5", "#4292C6", "#6BAED6", "#9ECAE1", "#C6DBEF"]
+
+EXPECTED_SCHEMA_VERSION = 3
 
 
 def load(path: Path) -> list[dict]:
-    return [json.loads(line) for line in path.open() if line.strip()]
+    events = [json.loads(line) for line in path.open() if line.strip()]
+    bad_versions = sorted({
+        event.get("schema_version")
+        for event in events
+        if event.get("schema_version") != EXPECTED_SCHEMA_VERSION
+    }, key=repr)
+    if bad_versions:
+        raise ValueError(
+            f"{path}: expected schema_version={EXPECTED_SCHEMA_VERSION}, found {bad_versions}"
+        )
+    return events
 
 
 def trace_id(events: list[dict], path: Path) -> tuple[str, str]:
@@ -169,18 +188,20 @@ def figure(by_trace: dict[tuple[str, str], tuple[list[int], dict]], out_path: Pa
     if plt is None:
         print("matplotlib not installed; skipped figure")
         return
-    max_origin = 0
+    observed_origins: set[int] = set()
     for steps, matrix in by_trace.values():
         for step in steps:
-            for origin in matrix[step]:
-                max_origin = max(max_origin, origin)
+            observed_origins.update(matrix[step])
+    if not observed_origins:
+        print("no KV origins observed; skipped figure")
+        return
     fig, axes = plt.subplots(2, 3, figsize=(13.5, 7.2), sharex=False)
     for r, row in enumerate(PANELS):
         for c, key in enumerate(row):
             ax = axes[r][c]
             steps, matrix = by_trace[key]
             bottoms = [0.0] * len(steps)
-            for origin in range(max_origin + 1):
+            for origin in sorted(observed_origins):
                 heights = [matrix[s].get(origin, 0) / 1e6 for s in steps]
                 if not any(heights):
                     continue
@@ -202,12 +223,17 @@ def figure(by_trace: dict[tuple[str, str], tuple[list[int], dict]], out_path: Pa
             ax.set_xlabel("generate step")
             ax.spines[["top", "right"]].set_visible(False)
             ax.margins(y=0.16)
+    initial_origin = min(observed_origins)
+    legend_origins = sorted(observed_origins)
     handles = [
         plt.Rectangle((0, 0), 1, 1, color=ORIGIN_COLORS[o % len(ORIGIN_COLORS)])
-        for o in range(max_origin + 1)
+        for o in legend_origins
     ]
-    labels = [f"origin step {o}" + (" (initial prompt)" if o == 0 else "") for o in range(max_origin + 1)]
-    fig.legend(handles, labels, loc="lower center", ncol=max_origin + 1,
+    labels = [
+        f"origin step {o}" + (" (initial prompt)" if o == initial_origin else "")
+        for o in legend_origins
+    ]
+    fig.legend(handles, labels, loc="lower center", ncol=len(legend_origins),
                frameon=False, fontsize=8.5, bbox_to_anchor=(0.5, -0.01))
     fig.suptitle(
         "Cross-step memory carry-over: per-step KV working set colored by the step that created it",

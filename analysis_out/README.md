@@ -20,7 +20,10 @@ These files are derived from the six checked-in H100 workflow-replay traces in
   signal while avoiding wall-clock drift from generation speed or system load.
   This excludes `search_corpus_scan`, which is a scan-pressure proxy for the
   search replay rather than a prompt-resident or measured resident-memory
-  object.
+  object. `logical_read_events` totals two populations, reported separately as
+  `prompt_construction_reads` (text/token re-reads during prompt assembly) and
+  `cached_prefix_kv_reads` (engine-reported cached-prefix KV reuse; present
+  only when prefix caching is on, so the total is cache-condition-dependent).
 - `kv_pressure.csv` — analytical KV totals split into logical projected KV,
   cached-prefix reuse KV, and cache-adjusted new KV.
 - `duplication_factor.csv` — text/token duplication and KV amplification
@@ -34,6 +37,22 @@ These files are derived from the six checked-in H100 workflow-replay traces in
   count-reconciliation rows from vLLM request-output counters.
 - `prompt_cache_summary.csv` — per-trace totals for prompt tokens, cached
   tokens, new prefill tokens, and cached-token fraction.
+- `carryover.csv` — per-step KV working set split into new-prefill versus
+  carried-from-an-earlier-step bytes, with the carried fraction
+  (`analysis/carryover.py`).
+- `nsight_summary.csv` — NVTX phase spans, kernel-class times, and total CUDA
+  memcpy from the auxiliary Nsight profile (`analysis/nsight.py`). The memcpy
+  volume is dominated by the one-time model-weight upload before step 1.
+
+## Historical v2 CSVs
+
+- `summary_v2.csv` — per-trace lifetime/reuse summary over `traces/batch_v2/`
+  (`analysis/lifetime.py`).
+- `per_category_breakdown.csv` — per-category byte-seconds and read shares.
+  **Provenance:** computed from the `hello_bug` subset (10 of the 20 v2
+  traces), per the usage line in `analysis/per_category.py`. The headline
+  99.994% / 3.34% split is for that subset; over all 20 traces the read share
+  is 3.46%. The qualitative capacity/access dichotomy holds for both.
 
 ## Evidence boundary
 
