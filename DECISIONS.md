@@ -19,15 +19,21 @@ For Qwen2.5-Coder-7B-Instruct with grouped-query attention:
 **Why:** vLLM V1 KVCacheManager hook surface is not stable enough for a 5-day
 timeline. Block-level events would be nice-to-have but the analytical estimate
 captures the same first-order behavior (KV bytes scale linearly with context
-length). Final-v3 reconciles tracer-derived leading-prefix token counts against
-vLLM request-output cached-token counters such as
-`request_output.num_cached_tokens`; this verifies cached-token availability and
-count consistency, not physical KV residency or independent semantic-span
-ground truth.
+length). Final-v3 tiles the engine-reported cached-token count
+(`request_output.num_cached_tokens`) over the tracer's contiguous span offsets,
+so the recorded `cached_token_delta` is structurally zero whenever the counter
+does not exceed the prompt length. The gate therefore verifies counter
+availability plus tiling sanity (cached tokens never exceed the
+tokenizer-derived prompt length, attribution within one KV block, and — since
+2026-06-10 — that the emitted cached-prefix read events sum to the recorded
+attribution). It is not an independent count reconciliation, physical KV
+residency, or semantic-span ground truth.
+*(2026-06-10: wording corrected — the previous text implied two independently
+derived counts being reconciled.)*
 
-**Revisit:** if cached-token extraction becomes unavailable, cached-token
-reconciliation diverges by more than one KV block, or a later implementation
-adds stable engine-level KV occupancy metrics.
+**Revisit:** if cached-token extraction becomes unavailable, the engine ever
+reports more cached tokens than the tokenizer-derived prompt length, or a
+later implementation adds stable engine-level KV occupancy metrics.
 
 ---
 

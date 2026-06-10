@@ -1,12 +1,15 @@
-# Generated trace and profile artifacts
+# Generated trace and profile artifacts.
+# traces/*.jsonl only matches scratch runs directly in traces/ (gitignore *
+# does not cross /), so the official traces/final_v3*/ datasets stay tracked.
+# The two legacy hello_bug_run traces predate the rule and stay tracked.
 traces/*.jsonl
+!traces/hello_bug_run1.jsonl
+!traces/hello_bug_run2.jsonl
 traces/*.parquet
 traces/*.nsys-rep
 traces/*.sqlite
 analysis_out/**/*.nsys-rep
 analysis_out/**/*.sqlite
-figures/final_v3/search_scanned_bytes.*
-figures/final_v3/compaction_raw_context.*
 
 # Python
 __pycache__/

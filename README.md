@@ -117,19 +117,22 @@ has fewer total prompt tokens (12,364 vs 22,234) but **more** new prefill tokens
 At every generate step the runner re-reads and re-projects every still-active
 object, so the per-step KV working set splits into newly-prefilled bytes versus
 **carried-from-an-earlier-step** bytes (`analysis/carryover.py`). By the final
-step of every default trace, **87–99% of the projected-KV working set originates
-in an earlier step** rather than being new work. **Compaction is the only
-mechanism that resets this** — compaction-on drops to 46% carried at the demotion
-step (step 3) while every other trace stays above 90%. This is the cross-step
-view GainSight's within-pass profiling cannot see, and it directly motivates
-caching reused prefixes and demoting bulky low-reuse context.
+step of every default trace, **~87–99% of the projected-KV working set
+originates in an earlier step** rather than being new work. **Compaction is the
+only mechanism that resets this mid-task** — compaction-on falls to 46% carried
+at the step-3 demotion (and 37% at step 4) before recovering, while every other
+trace ends its task above 90% carried. This is the cross-step view GainSight's
+within-pass profiling cannot see, and it directly motivates caching reused
+prefixes and demoting bulky low-reuse context.
 
 ### Cross-cutting: capacity-time and reuse are *decoupled*
 
-`raw_context` and `assistant_history` are both read 30×, yet `raw_context` holds
-**4.6× the byte-seconds** (size × lifetime). Neither size, lifetime, nor reuse
-*alone* separates the classes — placement must key on **(capacity-time × reuse)**
-jointly. That decoupling is what makes a tiered mapping non-trivial.
+In the compaction-off trace, `raw_context` and `assistant_history` both record
+30 logical read events, yet `raw_context` holds **4.6× the byte-seconds**
+(size × lifetime; 5.7× on the repo-preferred step-normalized byte-steps axis).
+Neither size, lifetime, nor reuse *alone* separates the classes — placement
+must key on **(capacity-time × reuse)** jointly. That decoupling is what makes
+a tiered mapping non-trivial.
 
 Kristen's retention/reuse diagnostics (`semantic_retention_by_class`,
 `reuse_interval_by_workload`, `workload_retention_composition`,
@@ -155,9 +158,12 @@ mapping keyed on (capacity-time, reuse):
 
 1. **Lifetime** — task-bounded logical presence (create → last access); reported
    step-normalized *and* in seconds (prefer steps for cross-workload comparison)
-2. **Reuse count** — `logical_read_events`: representation-level prompt-construction
-   accesses (a logical access-intensity signal, **not** a hardware
-   memory-transaction count)
+2. **Reuse count** — `logical_read_events`: representation-level logical access
+   events (a logical access-intensity signal, **not** a hardware
+   memory-transaction count). `semantic_summary.csv` decomposes it into
+   `prompt_construction_reads` (text/token re-reads while assembling each
+   prompt) and `cached_prefix_kv_reads` (engine-reported cached-prefix KV
+   reuse, present only when prefix caching is on)
 3. **Byte-seconds** — size × lifetime (capacity-time pressure)
 4. **KV pressure** — logical / cached-reuse / cache-adjusted-new KV per class
 5. **Duplication** — bytes held vs. unique logical bytes across representations
@@ -220,8 +226,11 @@ figures/       Paper-ready figures (PNG + SVG)
 tasks/         Fixtures: hello_bug, recursion_bug, search_agent, compaction_agent
 ```
 
-## Status (June 3, 2026)
+## Status (June 10, 2026)
 
+- Final presentation delivered June 1–3; final report and artifact submitted
+  June 8; post-submission audit pass applied June 10 (validator hardening,
+  figure/doc errata — no changes to the official traces or headline numbers)
 - Final-v3 H100 sweep: six real vLLM traces in `traces/final_v3/`, passing
   `validation.validate_final_v3`; validator regression check passes
 - Analysis CSVs/figures generated under `analysis_out/final_v3/` and

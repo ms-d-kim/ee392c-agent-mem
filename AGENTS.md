@@ -32,7 +32,8 @@ reinterpret. `DECISIONS.md` is authoritative; `README.md` is summary.
 ## Current status
 
 - Tracer v3, synthetic validation, final-v3 runner, final-v3 analysis, and
-  optional system telemetry are implemented locally.
+  optional system telemetry are implemented and exercised by the official
+  H100 sweep.
 - `validation.assert_validate_final_v3` exists as a local regression check for
   final-v3 validator failure modes that the six checked-in traces do not
   exercise directly.
@@ -41,8 +42,9 @@ reinterpret. `DECISIONS.md` is authoritative; `README.md` is summary.
 - The final-v3 H100 six-trace sweep has passed
   `validation.validate_final_v3`; auxiliary Nsight output is a representative
   compaction profile, not a seventh core workload.
-- The cached-token gate is an availability/count-reconciliation check against
-  vLLM request-output counters, not independent semantic-attribution proof.
+- The cached-token gate verifies counter availability and tiling sanity
+  against vLLM request-output counters (the span attribution is tiled from the
+  engine's own counter), not independent semantic-attribution proof.
 - The final-v3 workloads are scripted agent-workflow replays, not autonomous
   tool-selection loops.
 
@@ -120,6 +122,6 @@ Don't add a linter config or formatting rules. Match what's already in the file.
 - The synthetic test is the canonical correctness oracle.
 - DECISIONS.md is authoritative — if something seems contradictory, ask.
 - Out-of-scope items stay out of scope. Don't reintroduce them.
-- If a vLLM/LangGraph API has changed since these stubs were written, prefer
-  the current stable API, note the change in the commit message, and don't
-  rewrite the schema or decisions to accommodate it.
+- If a vLLM API has changed since this code was written, prefer the current
+  stable API, note the change in the commit message, and don't rewrite the
+  schema or decisions to accommodate it.

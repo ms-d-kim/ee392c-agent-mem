@@ -120,13 +120,16 @@ The chain: `tracer event (logical class)` → `token_offset_start/end` → `bloc
 
 **Validation gates** (both must pass before scale-up):
 
-1. **Engine cross-check:** Sum tracer-derived prefix-reusable tokens per request == vLLM's `usage.cached_tokens`. **[NEW]** Promoted from optional to required gate.
+1. **Engine cross-check:** Sum tracer-derived prefix-reusable tokens per request == vLLM's `usage.cached_tokens`. **[NEW]** Promoted from optional to required gate. **[SUPERSEDED — see the final-v3 update below; the implemented check is not two independent counts.]**
 2. **Block accounting:** Block table's live block count × block_size × per-token KV bytes ≈ tracer's analytical KV sum per request.
 
-Final-v3 update: the implemented gate reconciles tracer-derived leading-prefix
-token counts against vLLM cached-token counters. It verifies counter
-availability and count consistency; it is not independent engine ground truth
-for semantic-span attribution or physical KV residency.
+Final-v3 update: the implemented gate tiles the engine-reported cached-token
+counter over the tracer's contiguous span offsets, so the recorded delta is
+structurally zero whenever the counter does not exceed the prompt length. It
+verifies counter availability and tiling sanity (plus, since 2026-06-10, that
+the emitted cached-prefix read events match the recorded attribution); it is
+not independent engine ground truth for semantic-span attribution or physical
+KV residency.
 
 ---
 
