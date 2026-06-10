@@ -1,12 +1,21 @@
 """Validate final-v3 semantic traces.
 
 Checks:
-  - v2 base fields still exist
+  - JSONL lines parse and v2 base fields still exist
+  - timestamps are nondecreasing and start near zero
   - v3 token spans are ordered and length-matched per prompt step
   - every prompt-construction step carries an engine_cross_check event
-  - cached-token attribution is exact or within one KV block
+  - cached-token attribution is exact or within one KV block, and the
+    cross-check's cached_span_tokens matches the cached-prefix read events
+    actually emitted in the trace
   - KV byte counts match token_count * kv_bytes_per_token
-  - mutate creates a new logical version for the same object_id
+  - object lifecycle is legal (create-once-live; mutate/free require a live
+    object) and mutate creates a new logical version for the same object_id
+
+``cross_check_status="cache_disabled_unverified"`` is warning-only by policy:
+a cache-off trace from an engine without the cached-token API cannot verify
+zero-cache behavior, which is a measurement limitation rather than a corrupt
+trace.
 """
 
 from __future__ import annotations
@@ -32,8 +41,47 @@ EXPECTED_SCHEMA_VERSION = 3
 QWEN25_CODER_7B_BF16_KV_BYTES = 57344
 
 
-def load_events(path: Path) -> list[dict]:
-    return [json.loads(line) for line in path.open() if line.strip()]
+def load_events(path: Path) -> tuple[list[dict], list[str]]:
+    """Parse JSONL tolerantly: collect per-line errors instead of crashing.
+
+    A partially written trace (e.g. after a crashed run) must surface as a
+    clean ``FAIL <path>: N errors`` line, not an uncaught JSONDecodeError.
+    """
+    events = []
+    errors = []
+    for line_no, line in enumerate(path.open(), 1):
+        if not line.strip():
+            continue
+        try:
+            events.append(json.loads(line))
+        except json.JSONDecodeError as exc:
+            errors.append(f"{path}:{line_no}: invalid JSON: {exc}")
+    return events, errors
+
+
+def validate_timestamps(path: Path, events: list[dict]) -> list[str]:
+    """Timestamps are tracer-relative monotonic offsets; enforce both properties.
+
+    Shuffled or negative timestamps would silently corrupt every lifetime and
+    byte-seconds figure downstream, so they are gate-fatal.
+    """
+    errors = []
+    previous = None
+    for line_no, event in enumerate(events, 1):
+        ts = event.get("ts")
+        if not isinstance(ts, (int, float)):
+            errors.append(f"{path}:{line_no}: non-numeric ts {ts!r}")
+            continue
+        if previous is not None and ts < previous:
+            errors.append(f"{path}:{line_no}: ts {ts} decreases from {previous}")
+        previous = ts
+    first = next((e.get("ts") for e in events if isinstance(e.get("ts"), (int, float))), None)
+    if first is not None and not (0.0 <= first < 1.0):
+        errors.append(
+            f"{path}: first ts {first} outside [0, 1); tracer timestamps are "
+            "relative to Tracer.start()"
+        )
+    return errors
 
 
 def validate_base_fields(path: Path, events: list[dict]) -> list[str]:
@@ -99,9 +147,25 @@ def validate_cached_tokens(path: Path, events: list[dict]) -> list[str]:
                 f"(source={event.get('cached_tokens_source')!r})"
             )
             continue
-        cached = int(event.get("cached_tokens", 0))
-        attributed = int(event.get("cached_span_tokens", 0))
-        prompt_count = int(event.get("prompt_token_count", 0))
+        if status == "cache_disabled_unverified":
+            # Warning-only by policy (see module docstring); reported by
+            # validate_metadata_warnings. The generic counter checks below
+            # would always fail this status because cross_check_pass is False.
+            continue
+        missing_counters = [
+            name
+            for name in ("cached_tokens", "cached_span_tokens", "prompt_token_count")
+            if not isinstance(event.get(name), int)
+        ]
+        if missing_counters:
+            errors.append(
+                f"{path}:step {event['step']}: engine_cross_check missing or "
+                f"non-integer counters {missing_counters}"
+            )
+            continue
+        cached = int(event["cached_tokens"])
+        attributed = int(event["cached_span_tokens"])
+        prompt_count = int(event["prompt_token_count"])
         block = int(event.get("kv_block_size_tokens", 16))
         if cached > prompt_count:
             errors.append(
@@ -112,6 +176,42 @@ def validate_cached_tokens(path: Path, events: list[dict]) -> list[str]:
             errors.append(
                 f"{path}:step {event['step']}: cached_tokens={cached}, "
                 f"cached_span_tokens={attributed}, block={block}, status={status!r}"
+            )
+    return errors
+
+
+def validate_cached_read_attribution(path: Path, events: list[dict]) -> list[str]:
+    """Reconcile cross-check counters against the emitted cached-prefix reads.
+
+    ``validate_cached_tokens`` compares two fields of the same
+    engine_cross_check event, so a trace whose per-span cached-prefix read
+    events (op="read", source="vllm_cached_prefix") were dropped or corrupted
+    would still pass. Here we recompute the attributed token count per step
+    from those read events and require it to match the cross-check's
+    cached_span_tokens exactly.
+    """
+    errors = []
+    read_tokens_by_step = defaultdict(int)
+    for event in events:
+        if (
+            event.get("repr_type") == "kv_estimated"
+            and event.get("op") == "read"
+            and event.get("source") == "vllm_cached_prefix"
+        ):
+            read_tokens_by_step[event["step"]] += int(event.get("token_count") or 0)
+    for event in events:
+        if event.get("semantic_type") != "engine_cross_check":
+            continue
+        if event.get("cross_check_status") in ("unavailable", "cache_disabled_unverified"):
+            continue
+        attributed = event.get("cached_span_tokens")
+        if not isinstance(attributed, int):
+            continue  # reported by validate_cached_tokens
+        observed = read_tokens_by_step.get(event["step"], 0)
+        if observed != attributed:
+            errors.append(
+                f"{path}:step {event['step']}: cached-prefix read events sum to "
+                f"{observed} tokens but cross-check recorded cached_span_tokens={attributed}"
             )
     return errors
 
@@ -206,7 +306,13 @@ def validate_kv_sizes(path: Path, events: list[dict]) -> tuple[list[str], list[s
     return errors, warnings
 
 
-def validate_mutations(path: Path, events: list[dict]) -> list[str]:
+def validate_lifecycle(path: Path, events: list[dict]) -> list[str]:
+    """Per-object lifecycle legality plus the mutate-new-logical-version rule.
+
+    create while already live, mutate before create, and free before create
+    are all illegal sequences that the synthetic oracle rejects for its own
+    trace; enforce the same invariants on real traces.
+    """
     errors = []
     live_logical = {}
     for event in sorted(events, key=lambda e: (e["ts"], e["step"])):
@@ -214,31 +320,36 @@ def validate_mutations(path: Path, events: list[dict]) -> list[str]:
         op = event["op"]
         lid = event["logical_id"]
         if op == "create":
+            if oid in live_logical:
+                errors.append(f"{path}: {oid} created while already live")
             live_logical[oid] = lid
         elif op == "mutate":
-            previous = live_logical.get(oid)
-            if previous is not None and previous == lid:
+            if oid not in live_logical:
+                errors.append(f"{path}: {oid} mutated before create")
+            elif live_logical[oid] == lid:
                 errors.append(f"{path}: {oid} mutate reused logical_id {lid}")
             live_logical[oid] = lid
         elif op == "free":
-            live_logical.pop(oid, None)
+            if live_logical.pop(oid, None) is None:
+                errors.append(f"{path}: {oid} freed before create")
     return errors
 
 
 def validate_trace(path: Path) -> tuple[list[str], list[str]]:
-    events = load_events(path)
-    errors = []
+    events, errors = load_events(path)
     warnings = []
     errors.extend(validate_base_fields(path, events))
     errors.extend(validate_schema_version(path, events))
+    errors.extend(validate_timestamps(path, events))
     errors.extend(validate_spans(path, events))
     errors.extend(validate_cached_tokens(path, events))
+    errors.extend(validate_cached_read_attribution(path, events))
     errors.extend(validate_cross_check_coverage(path, events))
     warnings.extend(validate_metadata_warnings(path, events))
     kv_errors, kv_warnings = validate_kv_sizes(path, events)
     errors.extend(kv_errors)
     warnings.extend(kv_warnings)
-    errors.extend(validate_mutations(path, events))
+    errors.extend(validate_lifecycle(path, events))
     return errors, warnings
 
 
